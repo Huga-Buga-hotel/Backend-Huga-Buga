@@ -1,0 +1,71 @@
+# =====================================================================
+# Huga Buga Hotel - configuração base
+# Segredos e conexão vêm de VARIÁVEIS DE AMBIENTE (nunca versionar valores reais).
+#   DB_URL, DB_USER, DB_PASSWORD, JWT_SEGREDO (mínimo 32 caracteres)
+# Para desenvolvimento local use o perfil "dev" (application-dev.yml):
+#   mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# =====================================================================
+spring:
+  application:
+    name: huga-buga-api
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+  jpa:
+    open-in-view: false            # entidades nunca vazam para a camada web; só DTOs
+    hibernate:
+      ddl-auto: validate           # o schema é responsabilidade do Flyway
+    properties:
+      hibernate:
+        format_sql: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  jackson:
+    time-zone: America/Sao_Paulo
+
+server:
+  port: 8080
+  error:                           # nunca expor detalhes internos ao cliente
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+
+logging:
+  level:
+    root: INFO
+    com.hugabuga: INFO
+    # NÃO aumente o log de requisições HTTP: o corpo do pagamento leva cartão e CVV.
+
+hugabuga:
+  jwt:
+    segredo: ${JWT_SEGREDO}        # sem valor padrão: a aplicação não sobe sem ele
+    acesso-minutos: 15
+    refresh-dias: 30               # com "lembrar de mim" (sem ele: 1 dia)
+
+  cors:
+    origens: ${CORS_ORIGENS:http://localhost:3000,http://localhost:5173}
+
+  # Turnos do Banquete (entre aspas: o YAML leria 07:00 como número)
+  restaurante:
+    cafe-inicio: "07:00"
+    cafe-fim: "10:30"
+    almoco-inicio: "12:00"
+    almoco-fim: "15:00"
+    jantar-inicio: "19:00"
+    jantar-fim: "23:00"
+
+  # Regras de negócio ajustáveis
+  regras:
+    hold-minutos: 15               # tempo que a toca fica segurada
+    prorrogacao-minutos: 10        # o "+10 min" (uma única vez)
+    adulto-extra-centavos: 6000    # R$ 60 por adulto a mais, por noite
+    pix-percentual: 5              # desconto do Pix
+    pix-minutos: 10                # validade do código Pix
+    desconto-hospede-pct: 15       # desconto de hóspede no Banquete

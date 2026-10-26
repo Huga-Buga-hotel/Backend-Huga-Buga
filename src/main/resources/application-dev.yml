@@ -1,0 +1,17 @@
+# Perfil "dev": desenvolvimento local.
+# - Habilita POST /pagamentos/{id}/simular-confirmacao e a aprovação automática do Pix após 20 s.
+# - Traz valores padrão para rodar sem configurar variáveis de ambiente.
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/hugabuga}
+    username: ${DB_USER:hugabuga}
+    password: ${DB_PASSWORD:hugabuga}
+
+logging:
+  level:
+    com.hugabuga: DEBUG
+
+hugabuga:
+  jwt:
+    # Apenas para desenvolvimento. Em produção use a variável JWT_SEGREDO.
+    segredo: ${JWT_SEGREDO:dev-only-segredo-do-huga-buga-nao-use-em-producao-0123456789}
