@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       TZ: America/Sao_Paulo
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - hugabuga-data:/var/lib/postgresql/data
     healthcheck:
@@ -17,6 +17,24 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  api:
+    build:
+      context: .
+    container_name: hugabuga-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: ${DB_URL}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      JWT_SEGREDO: ${JWT_SEGREDO}
+      CORS_ORIGENS: ${CORS_ORIGENS}
+      TZ: America/Sao_Paulo
+    ports:
+      - "8080:8080"
 
 volumes:
   hugabuga-data:
