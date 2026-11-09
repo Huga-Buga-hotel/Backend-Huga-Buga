@@ -11,6 +11,9 @@ import java.time.*;
 import java.util.*;
 
 public interface UnidadeCavernaRepository extends JpaRepository<UnidadeCaverna, UUID> {
+    List<UnidadeCaverna> findAllByOrderByCodigo();
+    long countByCavernaIdAndAtivaTrue(UUID cavernaId);
+
 
     /**
      * Unidades livres no período. A data de saída do hóspede anterior NÃO bloqueia a entrada do próximo

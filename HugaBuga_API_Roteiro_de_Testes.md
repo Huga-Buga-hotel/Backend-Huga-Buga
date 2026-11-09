@@ -8,21 +8,25 @@
 |---|---|
 | URL base | `http://localhost:8080/api/v1` |
 | Subir a API | `mvn spring-boot:run -Dspring-boot.run.profiles=dev` |
-| Login de teste | `marina.souza@example.com` / `Uga!Buga2026` (450 ossos, tribo: Rafael, Theo e Lia) |
+| Login de teste | `marina.souza@example.com` / `Uga!Buga2026` (role VISITANTE, tribo: Rafael, Theo e Lia) |
+| Admin de teste | `admin@hugabuga.example` / `Admin!Buga2026` (role ADMIN: acessa `/admin/**` e qualquer reserva) |
+| Swagger | `http://localhost:8080/api/v1/docs` (referência completa e sempre atualizada) |
 | Content-Type | `application/json` nos bodies |
 | Dinheiro | sempre em **centavos** (`52000` = R$ 520,00) |
 | Datas | ISO: `2026-12-01`; horas: `20:00` na entrada e `20:00:00` na saída |
 | Cupom | `UGABUGA10` (10%, até 31/12/2026) |
 | Cartões | `4111111111111111` aprova · final `0002` recusa (saldo) · final `0069` recusa (vencido) · número inválido no Luhn = 400 |
-| Cavernas | `toca-do-mamute` R$ 520 (cap. 5), `gruta-do-casal` R$ 390 (cap. 2), `covil-dos-cacadores` R$ 610 (cap. 6), `suite-do-chefe-da-tribo` R$ 980 (cap. 8) |
+| Cavernas | 5 suítes, 25 tocas: `toca-do-mamute` R$ 520 (cap. 5, 6 tocas), `gruta-do-casal` R$ 390 (cap. 2, 6 tocas), `ninho-do-pterodactilo` R$ 470 (cap. 3, 5 tocas), `covil-dos-cacadores` R$ 610 (cap. 6, 5 tocas), `suite-do-chefe-da-tribo` R$ 980 (cap. 8, 3 tocas) |
+| Tempo de estadia | de 1 a 30 noites, check-in em até 365 dias |
 
 **Como a rota sabe quem você é (acesso):**
 
 - **livre**: sem token.
 - **login**: `Authorization: Bearer <accessToken>` (pegue no login).
-- **dono**: o token da dona da reserva **ou** o header `X-Responsavel-Email: <e-mail do responsável>` (para reserva feita sem conta). Qualquer outra pessoa recebe 403.
+- **dono**: o token da dona da reserva **ou** o header `X-Responsavel-Email: <e-mail do responsável>` (para reserva feita sem conta). O token de um ADMIN também passa. Qualquer outra pessoa recebe 403.
+- **admin**: token com role ADMIN (`/admin/**`). Visitante recebe 403.
 
-**Fluxo mínimo de uma reserva:** 1.2 Login → 3.2 Detalhe (pegue o `id` da caverna) → 4.1 Criar → 4.2 Hóspedes → 4.5 Extras → 4.6 Cupom → 4.10 Pagar → 4.15 Voucher.
+**Fluxo mínimo de uma reserva:** 1.2 Login → 3.2 Detalhe (pegue o `id` da caverna) → 4.1 Criar → 4.2 Hóspedes → 4.5 Extras → 4.6 Cupom → 4.8 Pagar → 4.13 Voucher.
 
 ## Formato padrão de erro
 
@@ -62,6 +66,9 @@ Toda resposta de erro tem o mesmo formato. `campos` só aparece em erro de valid
 | 422 | `CUPOM_INVALIDO` | Cupom inexistente, vencido ou esgotado |
 | 422 | `FORA_DO_PRAZO` | Cancelar/alterar fora do prazo, check-in antes de liberar |
 | 422 | `ESTADO_INVALIDO` | Ação que o estado atual da reserva/pagamento não permite |
+| 405 | `METODO_NAO_PERMITIDO` | A rota existe, mas não aceita esse método |
+| 413 | `ARQUIVO_GRANDE` | Foto da avaliação acima de 25 MB |
+| 415 | `FORMATO_NAO_SUPORTADO` | Content-Type diferente de JSON (ou multipart nas rotas com fotos) |
 | 503 | `INDISPONIVEL` | Banco fora do ar ou falha inesperada |
 
 Nos exemplos de erro abaixo, `ref` aparece sempre como `HB-7Q2X`; na prática ela muda a cada resposta.
@@ -82,11 +89,10 @@ Nos exemplos de erro abaixo, `ref` aparece sempre como `HB-7Q2X`; na prática el
   - 2.5 `POST /me/membros`: Adicionar membro
   - 2.6 `PATCH /me/membros/{id}`: Editar membro (envie todos os campos)
   - 2.7 `DELETE /me/membros/{id}`: Remover membro
-  - 2.8 `GET /me/ossos`: Ossos: saldo, nível e extrato
-  - 2.9 `GET /me/favoritos`: Listar favoritos
-  - 2.10 `POST /me/favoritos/{cavernaId}`: Favoritar caverna
-  - 2.11 `DELETE /me/favoritos/{cavernaId}`: Desfavoritar caverna
-  - 2.12 `GET /me/reservas`: Minhas reservas (aba = proximas | passadas | canceladas)
+  - 2.8 `GET /me/favoritos`: Listar favoritos
+  - 2.9 `POST /me/favoritos/{cavernaId}`: Favoritar caverna
+  - 2.10 `DELETE /me/favoritos/{cavernaId}`: Desfavoritar caverna
+  - 2.11 `GET /me/reservas`: Minhas reservas (aba = proximas | passadas | canceladas)
 - **3. Cavernas (público)**
   - 3.1 `GET /cavernas`: Busca com datas e filtros
   - 3.2 `GET /cavernas/toca-do-mamute`: Detalhe da caverna
@@ -101,20 +107,18 @@ Nos exemplos de erro abaixo, `ref` aparece sempre como `HB-7Q2X`; na prática el
   - 4.5 `PUT /reservas/{codigo}/extras`: Passo 2: escolher extras (lista completa; vazia = "Pular extras")
   - 4.6 `POST /reservas/{codigo}/cupom`: Passo 3: aplicar cupom
   - 4.7 `DELETE /reservas/{codigo}/cupom`: Remover cupom
-  - 4.8 `POST /reservas/{codigo}/ossos`: Usar ossos (múltiplos de 10, até 50% do total; exige login)
-  - 4.9 `DELETE /reservas/{codigo}/ossos`: Desfazer ossos
-  - 4.10 `POST /reservas/{codigo}/pagamentos`: Pagar: cartão (aprovado na hora)
-  - 4.11 `POST /reservas/{codigo}/pagamentos`: Pagar: Pix (5% de desconto, expira em 10 min)
-  - 4.12 `POST /reservas/{codigo}/pagamentos`: Pagar: na chegada (confirma sem cobrar)
-  - 4.13 `GET /pagamentos/{id}`: Status do pagamento (o front consulta a cada 3 s no Pix)
-  - 4.14 `POST /pagamentos/{id}/simular-confirmacao`: Confirmar o Pix de mentira (só perfil dev)
-  - 4.15 `GET /reservas/{codigo}`: Voucher (resumo completo)
-  - 4.16 `GET /reservas/{codigo}/voucher.pdf`: Voucher em PDF ("Baixar tábua")
-  - 4.17 `GET /reservas/buscar`: Reserva sem conta: buscar por código e e-mail
-  - 4.18 `POST /reservas/{codigo}/checkin`: Check-in online (libera 3 dias antes da chegada)
-  - 4.19 `PATCH /reservas/{codigo}/datas`: Alterar datas (recalcula o preço)
-  - 4.20 `POST /reservas/{codigo}/cancelar`: Cancelar (grátis até 2 dias antes do check-in)
-  - 4.21 `POST /reservas/{codigo}/relato`: Relato pós-estadia (nota 1 a 5)
+  - 4.8 `POST /reservas/{codigo}/pagamentos`: Pagar: cartão (aprovado na hora)
+  - 4.9 `POST /reservas/{codigo}/pagamentos`: Pagar: Pix (5% de desconto, expira em 10 min)
+  - 4.10 `POST /reservas/{codigo}/pagamentos`: Pagar: na chegada (confirma sem cobrar)
+  - 4.11 `GET /pagamentos/{id}`: Status do pagamento (o front consulta a cada 3 s no Pix)
+  - 4.12 `POST /pagamentos/{id}/simular-confirmacao`: Confirmar o Pix de mentira (só perfil dev)
+  - 4.13 `GET /reservas/{codigo}`: Voucher (resumo completo)
+  - 4.14 `GET /reservas/{codigo}/voucher.pdf`: Voucher em PDF ("Baixar tábua")
+  - 4.15 `GET /reservas/buscar`: Reserva sem conta: buscar por código e e-mail
+  - 4.16 `POST /reservas/{codigo}/checkin`: Check-in online (libera 3 dias antes da chegada)
+  - 4.17 `PATCH /reservas/{codigo}/datas`: Alterar datas (recalcula o preço)
+  - 4.18 `POST /reservas/{codigo}/cancelar`: Cancelar (grátis até 2 dias antes do check-in)
+  - 4.19 `POST /reservas/{codigo}/relato`: Avaliação pós-estadia (nota, comentário e até 5 fotos de 25 MB)
 - **5. Atividades**
   - 5.1 `GET /atividades`: Catálogo (filtro opcional: `?categoria=CRIANCAS`)
   - 5.2 `GET /atividades/{id}`: Detalhe da atividade
@@ -190,7 +194,8 @@ Nos exemplos de erro abaixo, `ref` aparece sempre como `HB-7Q2X`; na prática el
   "refreshToken": "q8Zk3vN1xT0b-Ur7mWc2YpLd5EaHsJf9oGtRiKnVhXw",
   "expiraEmSegundos": 900,
   "usuarioId": "c0a80101-5d2e-4b6f-8a11-0f3c9e7d21a1",
-  "nome": "Marina"
+  "nome": "Marina",
+  "role": "VISITANTE"
 }
 ```
 
@@ -279,7 +284,8 @@ Nos exemplos de erro abaixo, `ref` aparece sempre como `HB-7Q2X`; na prática el
   "refreshToken": "q8Zk3vN1xT0b-Ur7mWc2YpLd5EaHsJf9oGtRiKnVhXw",
   "expiraEmSegundos": 900,
   "usuarioId": "c0a80101-5d2e-4b6f-8a11-0f3c9e7d21a1",
-  "nome": "Ana"
+  "nome": "Ana",
+  "role": "VISITANTE"
 }
 ```
 
@@ -388,7 +394,8 @@ Nos exemplos de erro abaixo, `ref` aparece sempre como `HB-7Q2X`; na prática el
   "refreshToken": "q8Zk3vN1xT0b-Ur7mWc2YpLd5EaHsJf9oGtRiKnVhXw",
   "expiraEmSegundos": 900,
   "usuarioId": "c0a80101-5d2e-4b6f-8a11-0f3c9e7d21a1",
-  "nome": "Marina"
+  "nome": "Marina",
+  "role": "VISITANTE"
 }
 ```
 
@@ -482,9 +489,8 @@ Headers: `Authorization: Bearer {{token}}`
   "documentoMascarado": "•••• 8909",
   "dataNascimento": "1989-04-12",
   "aceitaOfertas": true,
-  "saldoOssos": 450,
-  "nivel": "Xamã",
-  "idioma": "PT"
+  "role": "VISITANTE",
+  "idioma": "pt-BR"
 }
 ```
 
@@ -533,9 +539,8 @@ Headers: `Authorization: Bearer {{token}}`
   "documentoMascarado": "•••• 8909",
   "dataNascimento": "1989-04-12",
   "aceitaOfertas": false,
-  "saldoOssos": 450,
-  "nivel": "Xamã",
-  "idioma": "PT"
+  "role": "VISITANTE",
+  "idioma": "pt-BR"
 }
 ```
 
@@ -850,61 +855,7 @@ Rota: `DELETE /me/membros/00000000-0000-0000-0000-000000000000`
 }
 ```
 
-### 2.8 GET `/me/ossos`
-
-**Ossos: saldo, nível e extrato**  ·  Acesso: login
-
-Headers: `Authorization: Bearer {{token}}`
-
-> O nível usa o total ACUMULADO de ganhos (520), não o saldo (450): por isso nunca cai.
-
-**Body**
-
-(não tem body)
-
-**Resultado esperado: 200 OK**
-
-```json
-{
-  "saldo": 450,
-  "acumulado": 520,
-  "nivel": "Xamã",
-  "proximoNivel": "Chefe da Tribo",
-  "faltam": 480,
-  "extrato": [
-    {
-      "quantidade": -70,
-      "motivo": "RESGATE",
-      "reservaId": null,
-      "criadoEm": "2026-10-26T18:00:00-03:00"
-    },
-    {
-      "quantidade": 520,
-      "motivo": "GANHO_ESTADIA",
-      "reservaId": null,
-      "criadoEm": "2026-10-26T18:00:00-03:00"
-    }
-  ]
-}
-```
-
-**Body com erro: Sem token**
-
-Headers: (sem Authorization)
-
-**Resultado esperado: 401 Unauthorized**
-
-```json
-{
-  "status": 401,
-  "codigo": "NAO_AUTENTICADO",
-  "titulo": "Uga! Quem é você?",
-  "mensagem": "Você precisa entrar na sua conta para fazer isso. Nada foi alterado. Faça login e tente de novo.",
-  "ref": "HB-7Q2X"
-}
-```
-
-### 2.9 GET `/me/favoritos`
+### 2.8 GET `/me/favoritos`
 
 **Listar favoritos**  ·  Acesso: login
 
@@ -963,7 +914,7 @@ Headers: (sem Authorization)
 }
 ```
 
-### 2.10 POST `/me/favoritos/{cavernaId}`
+### 2.9 POST `/me/favoritos/{cavernaId}`
 
 **Favoritar caverna**  ·  Acesso: login
 
@@ -995,7 +946,7 @@ Rota: `POST /me/favoritos/00000000-0000-0000-0000-000000000000`
 }
 ```
 
-### 2.11 DELETE `/me/favoritos/{cavernaId}`
+### 2.10 DELETE `/me/favoritos/{cavernaId}`
 
 **Desfavoritar caverna**  ·  Acesso: login
 
@@ -1031,7 +982,7 @@ Rota: `DELETE /me/favoritos/abc`
 }
 ```
 
-### 2.12 GET `/me/reservas?aba=proximas`
+### 2.11 GET `/me/reservas?aba=proximas`
 
 **Minhas reservas (aba = proximas | passadas | canceladas)**  ·  Acesso: login
 
@@ -1052,10 +1003,19 @@ Headers: `Authorization: Bearer {{token}}`
       "codigo": "HB-4F7K",
       "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
       "cavernaNome": "Toca do Mamute",
+      "cavernaSlug": "toca-do-mamute",
+      "fotoUrl": "https://cdn.hugabuga.example/cavernas/toca-do-mamute/1.jpg",
       "checkIn": "2026-12-01",
       "checkOut": "2026-12-04",
+      "noites": 3,
+      "adultos": 2,
+      "criancas": 1,
       "status": "CONFIRMADA",
-      "total": 161100
+      "total": 161100,
+      "pago": true,
+      "diasParaCheckIn": 20,
+      "temCombo": false,
+      "podeAvaliar": false
     }
   ],
   "mesas": [
@@ -1064,9 +1024,15 @@ Headers: `Authorization: Bearer {{token}}`
       "data": "2026-12-02",
       "horario": "20:00:00",
       "pessoas": 4,
-      "status": "CONFIRMADA"
+      "status": "CONFIRMADA",
+      "origem": "HOSPEDE"
     }
-  ]
+  ],
+  "contagem": {
+    "proximas": 2,
+    "passadas": 0,
+    "canceladas": 0
+  }
 }
 ```
 
@@ -1358,10 +1324,14 @@ Rota: `GET /cavernas/{id}/cotacao?checkIn=2026-12-01`
 {
   "itens": [
     {
+      "id": "8d2f0c11-3b7a-4e55-9c1d-2a6b7e9f0a31",
       "nota": 5,
       "texto": "Melhor toca da tribo!",
       "autor": "Marina S.",
-      "criadoEm": "2026-12-10T09:00:00-03:00"
+      "criadoEm": "2026-12-10T09:00:00-03:00",
+      "fotos": [
+        "/api/v1/arquivos/relatos/5b1e7c2a-9f3d-4a8e-b6c4-1d2e3f4a5b6c.jpg"
+      ]
     }
   ],
   "page": 0,
@@ -1443,7 +1413,7 @@ Rota: `GET /cavernas/00000000-0000-0000-0000-000000000000/relatos`
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -1456,13 +1426,14 @@ Rota: `GET /cavernas/00000000-0000-0000-0000-000000000000/relatos`
   "celular": null,
   "hospedes": [],
   "extras": [],
+  "combo": null,
   "cupom": null,
   "pedidoEspecial": null,
   "lateCheckout": false,
   "valorDiarias": 156000,
   "valorExtras": 0,
   "desconto": 0,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 156000,
   "pago": false,
   "checkinOnlineEm": null
@@ -1670,7 +1641,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -1704,13 +1675,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
     }
   ],
   "extras": [],
+  "combo": null,
   "cupom": null,
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": false,
   "valorDiarias": 156000,
   "valorExtras": 0,
   "desconto": 0,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 156000,
   "pago": false,
   "checkinOnlineEm": null
@@ -1835,7 +1807,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -1848,13 +1820,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "celular": null,
   "hospedes": [],
   "extras": [],
+  "combo": null,
   "cupom": null,
   "pedidoEspecial": null,
   "lateCheckout": false,
   "valorDiarias": 156000,
   "valorExtras": 0,
   "desconto": 0,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 156000,
   "pago": false,
   "checkinOnlineEm": null
@@ -1947,7 +1920,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -1996,13 +1969,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
       "subtotalCentavos": 15000
     }
   ],
+  "combo": null,
   "cupom": null,
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": true,
   "valorDiarias": 156000,
   "valorExtras": 23000,
   "desconto": 0,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 179000,
   "pago": false,
   "checkinOnlineEm": null
@@ -2082,7 +2056,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -2131,13 +2105,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
       "subtotalCentavos": 15000
     }
   ],
+  "combo": null,
   "cupom": "UGABUGA10",
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": true,
   "valorDiarias": 156000,
   "valorExtras": 23000,
   "desconto": 17900,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 161100,
   "pago": false,
   "checkinOnlineEm": null
@@ -2208,7 +2183,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -2257,13 +2232,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
       "subtotalCentavos": 15000
     }
   ],
+  "combo": null,
   "cupom": null,
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": true,
   "valorDiarias": 156000,
   "valorExtras": 23000,
   "desconto": 0,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 179000,
   "pago": false,
   "checkinOnlineEm": null
@@ -2286,257 +2262,13 @@ Headers: (sem Authorization e sem X-Responsavel-Email)
 }
 ```
 
-### 4.8 POST `/reservas/{codigo}/ossos`
-
-**Usar ossos (múltiplos de 10, até 50% do total; exige login)**  ·  Acesso: login + dono
-
-Headers: `Authorization: Bearer {{token}}`
-
-> 100 ossos = R$ 10. O saldo só é debitado quando a reserva é confirmada.
-
-**Body**
-
-```json
-{
-  "quantidade": 100
-}
-```
-
-**Resultado esperado: 200 OK**
-
-```json
-{
-  "codigo": "HB-4F7K",
-  "status": "PENDENTE",
-  "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
-  "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
-  "checkIn": "2026-12-01",
-  "checkOut": "2026-12-04",
-  "noites": 3,
-  "adultos": 2,
-  "criancas": 2,
-  "expiraEm": "2026-12-01T14:15:00-03:00",
-  "prorrogada": false,
-  "responsavelNome": "Marina Souza",
-  "responsavelEmail": "marina.souza@example.com",
-  "celular": "+55 11 98888-7777",
-  "hospedes": [
-    {
-      "nome": "Marina",
-      "tipo": "ADULTO",
-      "idade": null
-    },
-    {
-      "nome": "Rafael",
-      "tipo": "ADULTO",
-      "idade": null
-    },
-    {
-      "nome": "Theo",
-      "tipo": "CRIANCA",
-      "idade": 9
-    },
-    {
-      "nome": "Lia",
-      "tipo": "CRIANCA",
-      "idade": 4
-    }
-  ],
-  "extras": [
-    {
-      "extraId": "LATE_CHECKOUT",
-      "nome": "Late check-out",
-      "quantidade": 1,
-      "precoUnitarioCentavos": 8000,
-      "subtotalCentavos": 8000
-    },
-    {
-      "extraId": "FOGUEIRA_VIP",
-      "nome": "Fogueira VIP",
-      "quantidade": 1,
-      "precoUnitarioCentavos": 15000,
-      "subtotalCentavos": 15000
-    }
-  ],
-  "cupom": "UGABUGA10",
-  "pedidoEspecial": "Berço de pele no quarto",
-  "lateCheckout": true,
-  "valorDiarias": 156000,
-  "valorExtras": 23000,
-  "desconto": 17900,
-  "ossosUsados": 100,
-  "total": 160100,
-  "pago": false,
-  "checkinOnlineEm": null
-}
-```
-
-**Body com erro (1/3): Não é múltiplo de 10**
-
-```json
-{
-  "quantidade": 15
-}
-```
-
-**Resultado esperado: 400 Bad Request**
-
-```json
-{
-  "status": 400,
-  "codigo": "VALIDACAO",
-  "titulo": "Uga! Algo não bateu nos dados.",
-  "mensagem": "O resgate é em múltiplos de 10 ossos. Nada foi salvo. Corrija e tente novamente.",
-  "ref": "HB-7Q2X"
-}
-```
-
-**Body com erro (2/3): Mais do que o saldo (450)**
-
-```json
-{
-  "quantidade": 460
-}
-```
-
-**Resultado esperado: 400 Bad Request**
-
-```json
-{
-  "status": 400,
-  "codigo": "VALIDACAO",
-  "titulo": "Uga! Algo não bateu nos dados.",
-  "mensagem": "Você tem 450 ossos e tentou usar 460. Nada foi salvo. Corrija e tente novamente.",
-  "ref": "HB-7Q2X"
-}
-```
-
-**Body com erro (3/3): Sem login**
-
-Headers: (sem Authorization)
-
-```json
-{
-  "quantidade": 100
-}
-```
-
-**Resultado esperado: 401 Unauthorized**
-
-```json
-{
-  "status": 401,
-  "codigo": "NAO_AUTENTICADO",
-  "titulo": "Uga! Quem é você?",
-  "mensagem": "Você precisa entrar na sua conta para fazer isso. Nada foi alterado. Faça login e tente de novo.",
-  "ref": "HB-7Q2X"
-}
-```
-
-### 4.9 DELETE `/reservas/{codigo}/ossos`
-
-**Desfazer ossos**  ·  Acesso: login + dono
-
-Headers: `Authorization: Bearer {{token}}`
-
-**Body**
-
-(não tem body)
-
-**Resultado esperado: 200 OK**
-
-```json
-{
-  "codigo": "HB-4F7K",
-  "status": "PENDENTE",
-  "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
-  "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
-  "checkIn": "2026-12-01",
-  "checkOut": "2026-12-04",
-  "noites": 3,
-  "adultos": 2,
-  "criancas": 2,
-  "expiraEm": "2026-12-01T14:15:00-03:00",
-  "prorrogada": false,
-  "responsavelNome": "Marina Souza",
-  "responsavelEmail": "marina.souza@example.com",
-  "celular": "+55 11 98888-7777",
-  "hospedes": [
-    {
-      "nome": "Marina",
-      "tipo": "ADULTO",
-      "idade": null
-    },
-    {
-      "nome": "Rafael",
-      "tipo": "ADULTO",
-      "idade": null
-    },
-    {
-      "nome": "Theo",
-      "tipo": "CRIANCA",
-      "idade": 9
-    },
-    {
-      "nome": "Lia",
-      "tipo": "CRIANCA",
-      "idade": 4
-    }
-  ],
-  "extras": [
-    {
-      "extraId": "LATE_CHECKOUT",
-      "nome": "Late check-out",
-      "quantidade": 1,
-      "precoUnitarioCentavos": 8000,
-      "subtotalCentavos": 8000
-    },
-    {
-      "extraId": "FOGUEIRA_VIP",
-      "nome": "Fogueira VIP",
-      "quantidade": 1,
-      "precoUnitarioCentavos": 15000,
-      "subtotalCentavos": 15000
-    }
-  ],
-  "cupom": "UGABUGA10",
-  "pedidoEspecial": "Berço de pele no quarto",
-  "lateCheckout": true,
-  "valorDiarias": 156000,
-  "valorExtras": 23000,
-  "desconto": 17900,
-  "ossosUsados": 0,
-  "total": 161100,
-  "pago": false,
-  "checkinOnlineEm": null
-}
-```
-
-**Body com erro: Sem login**
-
-Headers: (sem Authorization)
-
-**Resultado esperado: 401 Unauthorized**
-
-```json
-{
-  "status": 401,
-  "codigo": "NAO_AUTENTICADO",
-  "titulo": "Uga! Quem é você?",
-  "mensagem": "Você precisa entrar na sua conta para fazer isso. Nada foi alterado. Faça login e tente de novo.",
-  "ref": "HB-7Q2X"
-}
-```
-
-### 4.10 POST `/reservas/{codigo}/pagamentos`
+### 4.8 POST `/reservas/{codigo}/pagamentos`
 
 **Pagar: cartão (aprovado na hora)**  ·  Acesso: dono
 
 Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.souza@example.com`
 
-> Aprova qualquer número que passe no algoritmo de Luhn. Só os 4 últimos dígitos e a bandeira são guardados. A reserva vira CONFIRMADA e o cupom/ossos são consumidos.
+> Aprova qualquer número que passe no algoritmo de Luhn. Só os 4 últimos dígitos e a bandeira são guardados. A reserva vira CONFIRMADA, o cupom é consumido e as mesas do combo (se houver) são confirmadas.
 
 **Body**
 
@@ -2748,7 +2480,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 }
 ```
 
-### 4.11 POST `/reservas/{codigo}/pagamentos`
+### 4.9 POST `/reservas/{codigo}/pagamentos`
 
 **Pagar: Pix (5% de desconto, expira em 10 min)**  ·  Acesso: dono
 
@@ -2828,7 +2560,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 }
 ```
 
-### 4.12 POST `/reservas/{codigo}/pagamentos`
+### 4.10 POST `/reservas/{codigo}/pagamentos`
 
 **Pagar: na chegada (confirma sem cobrar)**  ·  Acesso: dono
 
@@ -2887,7 +2619,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 }
 ```
 
-### 4.13 GET `/pagamentos/{id}`
+### 4.11 GET `/pagamentos/{id}`
 
 **Status do pagamento (o front consulta a cada 3 s no Pix)**  ·  Acesso: dono
 
@@ -2950,7 +2682,7 @@ Headers: (sem Authorization e sem X-Responsavel-Email)
 }
 ```
 
-### 4.14 POST `/pagamentos/{id}/simular-confirmacao`
+### 4.12 POST `/pagamentos/{id}/simular-confirmacao`
 
 **Confirmar o Pix de mentira (só perfil dev)**  ·  Acesso: dono
 
@@ -2997,7 +2729,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 }
 ```
 
-### 4.15 GET `/reservas/{codigo}`
+### 4.13 GET `/reservas/{codigo}`
 
 **Voucher (resumo completo)**  ·  Acesso: dono
 
@@ -3015,7 +2747,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "CONFIRMADA",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -3064,13 +2796,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
       "subtotalCentavos": 15000
     }
   ],
+  "combo": null,
   "cupom": "UGABUGA10",
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": true,
   "valorDiarias": 156000,
   "valorExtras": 23000,
   "desconto": 17900,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 161100,
   "pago": true,
   "checkinOnlineEm": null
@@ -3109,7 +2842,7 @@ Rota: `GET /reservas/HB-ZZZZ`
 }
 ```
 
-### 4.16 GET `/reservas/{codigo}/voucher.pdf`
+### 4.14 GET `/reservas/{codigo}/voucher.pdf`
 
 **Voucher em PDF ("Baixar tábua")**  ·  Acesso: dono
 
@@ -3139,7 +2872,7 @@ Headers: (sem Authorization e sem X-Responsavel-Email)
 }
 ```
 
-### 4.17 GET `/reservas/buscar?codigo=HB-4F7K&email=cliente@example.com`
+### 4.15 GET `/reservas/buscar?codigo=HB-4F7K&email=cliente@example.com`
 
 **Reserva sem conta: buscar por código e e-mail**  ·  Acesso: livre
 
@@ -3157,7 +2890,7 @@ Headers: (sem Authorization e sem X-Responsavel-Email)
   "status": "PENDENTE",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -3206,13 +2939,14 @@ Headers: (sem Authorization e sem X-Responsavel-Email)
       "subtotalCentavos": 15000
     }
   ],
+  "combo": null,
   "cupom": "UGABUGA10",
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": true,
   "valorDiarias": 156000,
   "valorExtras": 23000,
   "desconto": 17900,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 161100,
   "pago": false,
   "checkinOnlineEm": null
@@ -3257,7 +2991,7 @@ Rota: `GET /reservas/buscar?codigo=HB-4F7K`
 }
 ```
 
-### 4.18 POST `/reservas/{codigo}/checkin`
+### 4.16 POST `/reservas/{codigo}/checkin`
 
 **Check-in online (libera 3 dias antes da chegada)**  ·  Acesso: dono
 
@@ -3275,7 +3009,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "status": "CONFIRMADA",
   "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
   "cavernaNome": "Toca do Mamute",
-  "unidadeCodigo": "T-07",
+  "unidadeCodigo": "T-01",
   "checkIn": "2026-12-01",
   "checkOut": "2026-12-04",
   "noites": 3,
@@ -3324,13 +3058,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
       "subtotalCentavos": 15000
     }
   ],
+  "combo": null,
   "cupom": "UGABUGA10",
   "pedidoEspecial": "Berço de pele no quarto",
   "lateCheckout": true,
   "valorDiarias": 156000,
   "valorExtras": 23000,
   "desconto": 17900,
-  "ossosUsados": 0,
+  "valorCombo": 0,
   "total": 161100,
   "pago": true,
   "checkinOnlineEm": "2026-11-29T10:00:00-03:00"
@@ -3353,7 +3088,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 }
 ```
 
-### 4.19 PATCH `/reservas/{codigo}/datas`
+### 4.17 PATCH `/reservas/{codigo}/datas`
 
 **Alterar datas (recalcula o preço)**  ·  Acesso: dono
 
@@ -3379,7 +3114,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
     "status": "CONFIRMADA",
     "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
     "cavernaNome": "Toca do Mamute",
-    "unidadeCodigo": "T-07",
+    "unidadeCodigo": "T-01",
     "checkIn": "2026-12-01",
     "checkOut": "2026-12-05",
     "noites": 4,
@@ -3428,13 +3163,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
         "subtotalCentavos": 15000
       }
     ],
+    "combo": null,
     "cupom": "UGABUGA10",
     "pedidoEspecial": "Berço de pele no quarto",
     "lateCheckout": true,
     "valorDiarias": 208000,
     "valorExtras": 23000,
     "desconto": 23100,
-    "ossosUsados": 0,
+    "valorCombo": 0,
     "total": 207900,
     "pago": true,
     "checkinOnlineEm": null
@@ -3543,13 +3279,13 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 }
 ```
 
-### 4.20 POST `/reservas/{codigo}/cancelar`
+### 4.18 POST `/reservas/{codigo}/cancelar`
 
 **Cancelar (grátis até 2 dias antes do check-in)**  ·  Acesso: dono
 
 Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.souza@example.com`
 
-> Dentro do prazo: reembolso integral e ossos de volta. Fora: sem reembolso; se era "pagar na chegada", `multaCentavos` = 1 diária (52000).
+> Dentro do prazo: reembolso integral. Fora: sem reembolso; se era "pagar na chegada", `multaCentavos` = 1 diária (52000).
 
 **Body**
 
@@ -3564,7 +3300,7 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
     "status": "CANCELADA",
     "cavernaId": "3f1c8d52-9a4b-4e7a-b1d2-6c0e5a7f9b10",
     "cavernaNome": "Toca do Mamute",
-    "unidadeCodigo": "T-07",
+    "unidadeCodigo": "T-01",
     "checkIn": "2026-12-01",
     "checkOut": "2026-12-04",
     "noites": 3,
@@ -3613,13 +3349,14 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
         "subtotalCentavos": 15000
       }
     ],
+    "combo": null,
     "cupom": "UGABUGA10",
     "pedidoEspecial": "Berço de pele no quarto",
     "lateCheckout": true,
     "valorDiarias": 156000,
     "valorExtras": 23000,
     "desconto": 17900,
-    "ossosUsados": 0,
+    "valorCombo": 0,
     "total": 161100,
     "pago": true,
     "checkinOnlineEm": null
@@ -3661,62 +3398,68 @@ Headers: (sem Authorization e sem X-Responsavel-Email)
 }
 ```
 
-### 4.21 POST `/reservas/{codigo}/relato`
+### 4.19 POST `/reservas/{codigo}/relato`
 
-**Relato pós-estadia (nota 1 a 5)**  ·  Acesso: dono
+**Avaliação pós-estadia: nota, comentário e fotos**  ·  Acesso: login (a conta que reservou)
 
-Headers: `Authorization: Bearer {{token}}`
+Headers: `Authorization: Bearer {{token}}`  ·  `Content-Type: multipart/form-data`
 
-> Só em reserva CONCLUIDA (o job diário das 03:00 conclui depois do check-out). Um relato por estadia; só quem tem conta.
+> Só em reserva CONCLUIDA (o job diário das 03:00 conclui depois do check-out). Uma avaliação por estadia; só quem reservou com conta. Até 5 fotos JPG, PNG ou WEBP de até 25 MB cada (o tipo é conferido pelos bytes).
 
-**Body**
+**Body (multipart)**
 
-```json
-{
-  "nota": 5,
-  "texto": "Melhor toca da tribo! As crianças amaram."
-}
+| Campo | Tipo | Obrigatório |
+|---|---|---|
+| `nota` | 1 a 5 | sim |
+| `texto` | até 2000 caracteres | não |
+| `fotos` | arquivo (repita o campo para cada foto) | não |
+
+```bash
+curl -X POST http://localhost:8080/api/v1/reservas/HB-4F7K/relato \
+  -H "Authorization: Bearer $TOKEN" \
+  -F nota=5 -F "texto=Melhor toca da tribo! As crianças amaram." \
+  -F fotos=@fogueira.jpg -F fotos=@toca.png
 ```
 
 **Resultado esperado: 201 Created**
 
-(sem corpo)
-
-**Body com erro (1/3): Nota fora de 1 a 5**
-
 ```json
 {
-  "nota": 9,
-  "texto": "Ótimo"
-}
-```
-
-**Resultado esperado: 400 Bad Request**
-
-```json
-{
-  "status": 400,
-  "codigo": "VALIDACAO",
-  "titulo": "Uga! Algo não bateu nos dados.",
-  "mensagem": "Alguns campos estão inválidos. Nada foi salvo. Corrija e tente novamente.",
-  "ref": "HB-7Q2X",
-  "campos": [
-    {
-      "campo": "nota",
-      "erro": "deve ser menor que ou igual a 5"
-    }
+  "id": "8d2f0c11-3b7a-4e55-9c1d-2a6b7e9f0a31",
+  "nota": 5,
+  "texto": "Melhor toca da tribo! As crianças amaram.",
+  "autor": "Marina S.",
+  "criadoEm": "2026-12-10T09:00:00-03:00",
+  "fotos": [
+    "/api/v1/arquivos/relatos/5b1e7c2a-9f3d-4a8e-b6c4-1d2e3f4a5b6c.jpg",
+    "/api/v1/arquivos/relatos/0c9d8e7f-6a5b-4c3d-2e1f-0a9b8c7d6e5f.png"
   ]
 }
 ```
 
-**Body com erro (2/3): Estadia ainda não concluída**
+**Body com erro (1/5): Nota fora de 1 a 5** (`nota=9`)
+
+**Resultado esperado: 400 Bad Request** · `codigo: VALIDACAO` · "A nota vai de 1 a 5."
+
+**Body com erro (2/5): Arquivo que não é imagem** (ex.: um `.pdf` renomeado para `.jpg`)
+
+**Resultado esperado: 400 Bad Request** · `codigo: VALIDACAO` · "O arquivo "x.jpg" não é uma imagem JPG, PNG ou WEBP."
+
+**Body com erro (3/5): Foto acima de 25 MB**
+
+**Resultado esperado: 413 Content Too Large**
 
 ```json
 {
-  "nota": 5,
-  "texto": "Ótimo"
+  "status": 413,
+  "codigo": "ARQUIVO_GRANDE",
+  "titulo": "Uga! Essa pedra é pesada demais.",
+  "mensagem": "Cada foto pode ter até 25 MB (no máximo 5 por avaliação). Nada foi salvo. Diminua as imagens e tente de novo.",
+  "ref": "HB-7Q2X"
 }
 ```
+
+**Body com erro (4/5): Estadia ainda não concluída**
 
 **Resultado esperado: 422 Unprocessable Entity**
 
@@ -3730,26 +3473,9 @@ Headers: `Authorization: Bearer {{token}}`
 }
 ```
 
-**Body com erro (3/3): Segundo relato da mesma estadia**
+**Body com erro (5/5): Segunda avaliação da mesma estadia**
 
-```json
-{
-  "nota": 4,
-  "texto": "De novo"
-}
-```
-
-**Resultado esperado: 422 Unprocessable Entity**
-
-```json
-{
-  "status": 422,
-  "codigo": "ESTADO_INVALIDO",
-  "titulo": "Uga! Isso não dá agora.",
-  "mensagem": "Esta estadia já tem um relato. Nada foi alterado.",
-  "ref": "HB-7Q2X"
-}
-```
+**Resultado esperado: 422 Unprocessable Entity** · `codigo: ESTADO_INVALIDO` · "Esta estadia já foi avaliada. Nada foi alterado."
 
 ---
 
@@ -4276,7 +4002,8 @@ Rota: `GET /reservas/{codigo}/agenda?data=2027-01-01`
   ],
   "abertoAgora": false,
   "turnoAtual": null,
-  "descontoHospedePct": 15
+  "descontoHospedePct": 15,
+  "capacidadePessoas": 50
 }
 ```
 
@@ -4336,7 +4063,7 @@ Rota: `GET /restaurante/cardapio?categoria=XYZ`
 
 **Horários LIVRE ou LOTADO**  ·  Acesso: livre
 
-> 6 horários (19:00 a 21:30), capacidade de 40 pessoas cada. Fica LOTADO quando (já reservados + pessoas pedidas) passa de 40.
+> 6 horários de início (19:00 a 21:30). O salão tem 50 lugares e cada mesa ocupa 90 min, então mesas de horários vizinhos somam juntas. Fica LOTADO quando as pessoas pedidas não cabem em algum momento da refeição.
 
 **Body**
 
@@ -4349,12 +4076,12 @@ Rota: `GET /restaurante/cardapio?categoria=XYZ`
   {
     "horario": "19:00:00",
     "status": "LIVRE",
-    "vagasRestantes": 40
+    "vagasRestantes": 50
   },
   {
     "horario": "19:30:00",
     "status": "LIVRE",
-    "vagasRestantes": 40
+    "vagasRestantes": 50
   },
   {
     "horario": "20:00:00",
@@ -4420,11 +4147,25 @@ Rota: `GET /restaurante/horarios?pessoas=2`
 
 ### 6.4 POST `/restaurante/reservas-mesa`
 
-**Reservar mesa ("Uga! Reservar mesa")**  ·  Acesso: dono
+**Reservar mesa ("Uga! Reservar mesa")**  ·  Acesso: dono (hóspede) ou livre (visitante de fora)
 
 Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.souza@example.com`
 
-> Só hóspede com reserva CONFIRMADA e a data dentro da estadia. `descontoHospedePct` (15%) é informativo. `nomeContato` e `celularContato` são opcionais (usa os do responsável).
+> **Hóspede:** com `codigoReserva` (reserva CONFIRMADA e data dentro da estadia), `origem: HOSPEDE` e 15% de desconto. `nomeContato` e `celularContato` são opcionais (usa os do responsável).
+> **Visitante de fora:** sem `codigoReserva`; informe `nomeContato`, `emailContato` e `celularContato` (ou esteja logado). `origem: EXTERNO`, sem desconto, até 60 dias à frente. Para ver/cancelar depois, use o token da conta ou `X-Responsavel-Email` com o e-mail de contato.
+
+Exemplo de visitante de fora:
+
+```json
+{
+  "nomeContato": "Joana Lima",
+  "emailContato": "joana@example.com",
+  "celularContato": "+55 11 97777-6666",
+  "data": "2026-12-02",
+  "horario": "20:00",
+  "pessoas": 2
+}
+```
 
 **Body**
 
@@ -4446,6 +4187,8 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 ```json
 {
   "codigo": "BQ-9XQ2",
+  "origem": "HOSPEDE",
+  "codigoReserva": "HB-4F7K",
   "data": "2026-12-02",
   "horario": "20:00:00",
   "pessoas": 4,
@@ -4631,6 +4374,8 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 ```json
 {
   "codigo": "BQ-9XQ2",
+  "origem": "HOSPEDE",
+  "codigoReserva": "HB-4F7K",
   "data": "2026-12-02",
   "horario": "20:00:00",
   "pessoas": 4,
@@ -4689,6 +4434,8 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
 ```json
 {
   "codigo": "BQ-9XQ2",
+  "origem": "HOSPEDE",
+  "codigoReserva": "HB-4F7K",
   "data": "2026-12-02",
   "horario": "20:00:00",
   "pessoas": 4,
@@ -4731,6 +4478,38 @@ Headers: `Authorization: Bearer {{token}}  **ou**  X-Responsavel-Email: marina.s
   "ref": "HB-7Q2X"
 }
 ```
+
+---
+
+## 8. Rotas novas desta versão (detalhes no Swagger)
+
+O Swagger (`/api/v1/docs`) traz o body, a resposta e os erros de cada uma.
+
+| Método | Rota | Acesso | O que testar |
+|---|---|---|---|
+| GET | `/home` | livre | 3 cavernas em destaque, 4 aventuras, card do Banquete (`capacidadePessoas: 50`), depoimentos, `totalTocas: 25` |
+| GET | `/cavernas/filtros` | livre | 5 cavernas nas categorias, faixa de preço 39000–98000, `minNoites: 1`, `maxNoites: 30` |
+| GET | `/cavernas/{id}/disponibilidade?de=&ate=` | livre | Tocas livres por noite; reserve e veja o número cair; mais de 92 dias = 400 |
+| POST | `/reservas` com 31 noites | livre | 400 VALIDACAO "A estadia máxima é de 30 noites." |
+| GET | `/restaurante/combos` | livre | `JANTAR_DA_TRIBO` (R$ 89 adulto / R$ 45 criança por noite) e `BANQUETE_COMPLETO` (R$ 139 / R$ 69) |
+| PUT | `/reservas/{codigo}/combo` | dono | Body `{"comboId":"JANTAR_DA_TRIBO","horario":"20:00"}`. Exige o passo 1 feito; `valorCombo` entra no total; `combo.mesas` traz uma mesa por noite |
+| DELETE | `/reservas/{codigo}/combo` | dono | Total volta e as mesas do combo são canceladas |
+| GET | `/reservas/{codigo}/agenda.ics` | dono | Arquivo de calendário da estadia |
+| GET | `/atividades/sessoes?data=` | livre | Sessões de todas as atividades no dia, com vagas |
+| POST | `/auth/esqueci-senha` | livre | Body `{"email":"marina.souza@example.com"}`; no perfil dev vem `tokenDev` |
+| POST | `/auth/redefinir-senha` | livre | Body `{"token":"<tokenDev>","novaSenha":"NovaSenha!2026"}`; reusar o token = 400 |
+| GET / PUT | `/me/preferencias` | login | Idioma (`pt-BR`, `en`, `es`) e notificações |
+| GET | `/me/pagamentos` | login | Histórico de pagamentos (só final e bandeira do cartão) |
+| GET | `/arquivos/relatos/{arquivo}` | livre | Imagem de uma avaliação |
+| GET | `/admin/dashboard` | admin | `tocasTotal: 25`, ocupação, entradas/saídas, receita do mês, lotação do Banquete. Visitante = 403 |
+| GET | `/admin/reservas?status=&de=&ate=&busca=` | admin | Lista paginada de todas as reservas |
+| GET | `/admin/ocupacao?data=` | admin | As 25 tocas: LIVRE, OCUPADA ou MANUTENCAO |
+| PATCH | `/admin/unidades/{id}` | admin | `{"ativa":false}` tira a toca da disponibilidade |
+| GET / PATCH | `/admin/cavernas`, `/admin/cavernas/{id}` | admin | Edita preço base, textos e se a suíte está ativa |
+| GET | `/admin/restaurante/mesas?data=` | admin | Mesas do dia (hóspede, combo e visitante) e lotação por horário |
+| POST | `/admin/restaurante/mesas/{codigo}/nao-compareceu` | admin | Só depois do horário da mesa |
+| DELETE | `/admin/relatos/{id}` | admin | Remove avaliação e fotos; a nota da caverna é recalculada |
+| GET / PATCH | `/admin/usuarios`, `/admin/usuarios/{id}/role` | admin | `{"role":"ADMIN"}`; ninguém tira o próprio acesso de admin |
 
 ---
 

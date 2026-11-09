@@ -9,12 +9,16 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.*;
 import java.util.*;
-
 public interface HorarioMesaRepository extends JpaRepository<HorarioMesa, UUID> {
     List<HorarioMesa> findAllByOrderByHorario();
 
-    /** Trava a linha do horário: reservas simultâneas não estouram a capacidade. */
+    Optional<HorarioMesa> findByHorario(LocalTime horario);
+
+    /**
+     * Trava TODOS os horários (SELECT ... FOR UPDATE). A capacidade é do salão e mesas de horários vizinhos
+     * se sobrepõem, então duas reservas simultâneas em qualquer horário precisam ser serializadas.
+     */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select h from HorarioMesa h where h.horario = :horario")
-    Optional<HorarioMesa> travarPorHorario(@Param("horario") LocalTime horario);
+    @Query("select h from HorarioMesa h order by h.horario")
+    List<HorarioMesa> travarTodos();
 }

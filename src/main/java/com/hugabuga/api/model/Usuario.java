@@ -25,7 +25,11 @@ public class Usuario {
     private String numeroDocumento;
     private LocalDate dataNascimento;
     private boolean aceitaOfertas;
-    /** Nunca negativo (CHECK no banco). */
-    @Column(nullable = false) private int saldoOssos = 0;
+    /** VISITANTE (hóspede/cliente) ou ADMIN (equipe do hotel). Vai no token JWT. */
+    @Enumerated(EnumType.STRING) @Column(nullable = false) private Role role = Role.VISITANTE;
+    /** pt-BR, en ou es. */
+    @Column(nullable = false, length = 5) private String idioma = "pt-BR";
+    private boolean notificacoesEmail = true;
+    private boolean notificacoesWhatsapp;
     @Column(nullable = false) private OffsetDateTime criadoEm;
 }

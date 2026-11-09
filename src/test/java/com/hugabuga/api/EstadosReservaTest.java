@@ -103,7 +103,7 @@ class EstadosReservaTest extends IntegrationTestBase {
     @Test
     void jobDeExpiracaoMarcaVencidasELiberaAUnidade() {
         Solicitante s = anonimo("cliente@example.com");
-        for (int i = 0; i < 2; i++) criar(TOCA, dias(40), dias(43), 2, List.of(), anonimo("x" + i + "@example.com"));
+        for (int i = 0; i < tocas(TOCA) - 1; i++) criar(TOCA, dias(40), dias(43), 2, List.of(), anonimo("x" + i + "@example.com"));
         ReservaRes r = criar(TOCA, dias(40), dias(43), 2, List.of(), s);
         assertEquals(0, unidadeRepository.unidadesLivres(cavernaId(TOCA), dias(40), dias(43)).size());
 
@@ -132,19 +132,17 @@ class EstadosReservaTest extends IntegrationTestBase {
     }
 
     @Test
-    void jobDeConclusaoCreditaUmOssoACadaDezReaisEmDiarias() {
+    void jobDeConclusaoEncerraEstadiasComCheckOutPassado() {
         Solicitante s = marina();
-        ReservaRes r = criarPadrao(s);                          // diárias R$ 1.560 -> 156 ossos
+        ReservaRes r = criarPadrao(s);
         pagamentoService.pagar(r.codigo(), naChegada(), s);
         Reserva e = reserva(r.codigo());
         e.setCheckIn(dias(-5));                                 // estadia já terminada
         e.setCheckOut(dias(-2));
         reservaRepository.saveAndFlush(e);
-        int saldoAntes = usuarioRepository.findById(marinaId()).orElseThrow().getSaldoOssos();
 
         reservaService.concluirEstadias();
 
         assertEquals(CONCLUIDA, reserva(r.codigo()).getStatus());
-        assertEquals(saldoAntes + 156, usuarioRepository.findById(marinaId()).orElseThrow().getSaldoOssos());
     }
 }

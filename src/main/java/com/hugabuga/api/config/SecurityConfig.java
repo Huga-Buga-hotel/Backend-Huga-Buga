@@ -26,11 +26,13 @@ import java.util.List;
 /**
  * Sessão stateless, BCrypt, CORS para o front, CSRF desligado (API com token no header).
  *
- * Três níveis de acesso, como no guia:
+ * Níveis de acesso:
  *  - livre:  qualquer um;
- *  - login:  token JWT válido;
+ *  - login:  token JWT válido (role VISITANTE ou ADMIN);
  *  - dono:   a rota é aberta aqui, mas o SERVICE confere se a reserva é do usuário logado ou se o pedido
  *            traz o e-mail do responsável (ReservaService.verificarDono). É o que permite reservar sem conta.
+ *            ADMIN passa nessa conferência para qualquer reserva;
+ *  - admin:  /admin/** exige role ADMIN.
  */
 @Configuration
 public class SecurityConfig {
@@ -64,19 +66,24 @@ public class SecurityConfig {
                 .authorizeHttpRequests(a -> a
                         // --- livres: sistema ---
                         .requestMatchers("/error", API + "/health", API + "/docs", API + "/docs/**",
-                                "/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                                API + "/swagger-ui/**", "/v3/api-docs", "/v3/api-docs/**",
+                                "/swagger-ui/**", "/swagger-ui.html").permitAll()
 
                         // --- Auth: cadastro, login e refresh livres; logout exige login ---
-                        .requestMatchers(HttpMethod.POST, API + "/auth/cadastro", API + "/auth/login", API + "/auth/refresh").permitAll()
+                        .requestMatchers(HttpMethod.POST, API + "/auth/cadastro", API + "/auth/login", API + "/auth/refresh",
+                                API + "/auth/esqueci-senha", API + "/auth/redefinir-senha").permitAll()
                         .requestMatchers(API + "/auth/**").authenticated()
+
+                        // --- equipe do hotel ---
+                        .requestMatchers(API + "/admin/**").hasRole("ADMIN")
 
                         // --- exigem login (precisam vir ANTES das regras de /reservas/**) ---
                         .requestMatchers(API + "/me/**").authenticated()
-                        .requestMatchers(API + "/reservas/*/ossos").authenticated()
+                        .requestMatchers(HttpMethod.POST, API + "/reservas/*/relato").authenticated()
 
                         // --- livres: leitura de catálogo, busca e reserva sem conta ---
-                        .requestMatchers(HttpMethod.GET, API + "/cavernas/**", API + "/comodidades",
-                                API + "/atividades/**", API + "/extras").permitAll()
+                        .requestMatchers(HttpMethod.GET, API + "/home", API + "/cavernas/**", API + "/comodidades",
+                                API + "/atividades/**", API + "/extras", API + "/arquivos/**").permitAll()
                         .requestMatchers(HttpMethod.POST, API + "/reservas", API + "/alertas-vaga").permitAll()
                         .requestMatchers(HttpMethod.GET, API + "/reservas/buscar").permitAll()
 

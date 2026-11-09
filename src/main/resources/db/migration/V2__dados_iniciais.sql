@@ -1,12 +1,13 @@
 -- =====================================================================
 -- Huga Buga Hotel - dados iniciais (cavernas, atividades, cardápio...)
--- Usuária de teste: marina.souza@example.com  |  senha: Uga!Buga2026
--- ATENÇÃO: contém usuária e senha de teste. Não use esta carga em produção.
+-- Usuária de teste (VISITANTE): marina.souza@example.com  |  senha: Uga!Buga2026
+-- Administrador de teste (ADMIN): admin@hugabuga.example   |  senha: Admin!Buga2026
+-- ATENÇÃO: contém usuários e senhas de teste. Não use esta carga em produção.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- Cavernas (o design detalha 4; o front fala em "7": cadastre mais 3 depois, em V3__...)
--- nota_media e total_relatos são valores de demonstração; são recalculados a cada novo relato.
+-- Cavernas: 5 tipos de suíte, 25 tocas (quartos físicos) no total.
+-- nota_media e total_relatos são valores de demonstração; são recalculados a cada nova avaliação.
 -- ---------------------------------------------------------------------
 INSERT INTO caverna (slug, nome, categoria, ala, resumo, descricao, capacidade, camas, area_m2,
                      preco_base_centavos, acessivel, aceita_pets, nota_media, total_relatos) VALUES
@@ -25,16 +26,20 @@ INSERT INTO caverna (slug, nome, categoria, ala, resumo, descricao, capacidade, 
 ('suite-do-chefe-da-tribo', 'Suíte do Chefe da Tribo', 'GRUPO', 'Ala do Topo',
  'A maior e mais exclusiva: banheira, fogueira e vista de todo o vale.',
  'No ponto mais alto do hotel, a Suíte do Chefe reúne tudo: banheira de pedra, fogueira privativa, berço de pele e uma vista de tirar o fôlego. Acomoda até 8 pessoas.',
- 8, 5, 85, 98000, true, false, 5.0, 41);
+ 8, 5, 85, 98000, true, false, 5.0, 41),
+('ninho-do-pterodactilo', 'Ninho do Pterodáctilo', 'CASAL', 'Ala do Penhasco',
+ 'Suspenso no penhasco: rede sobre o vale e o céu inteiro só para vocês.',
+ 'Construído na parede do penhasco, o Ninho do Pterodáctilo tem rede de descanso sobre o vale, banheira de pedra e uma claraboia para ver as estrelas. Para casais ou casal com um pequeno caçador.',
+ 3, 1, 32, 47000, false, false, 4.9, 57);
 
--- Unidades físicas (2 a 3 por caverna): é o que permite "Só restam 2 tocas"
+-- Unidades físicas (25 no total): é o que permite "Só restam 2 tocas"
+--   Toca do Mamute 6 · Gruta do Casal 6 · Ninho do Pterodáctilo 5 · Covil dos Caçadores 5 · Suíte do Chefe 3
 INSERT INTO unidade_caverna (caverna_id, codigo)
-SELECT c.id, v.codigo
-FROM (VALUES ('toca-do-mamute', 'T-07'), ('toca-do-mamute', 'T-08'), ('toca-do-mamute', 'T-09'),
-             ('gruta-do-casal', 'G-01'), ('gruta-do-casal', 'G-02'), ('gruta-do-casal', 'G-03'),
-             ('covil-dos-cacadores', 'C-01'), ('covil-dos-cacadores', 'C-02'),
-             ('suite-do-chefe-da-tribo', 'S-01'), ('suite-do-chefe-da-tribo', 'S-02')) AS v(slug, codigo)
-JOIN caverna c ON c.slug = v.slug;
+SELECT c.id, v.prefixo || '-' || lpad(n::text, 2, '0')
+FROM (VALUES ('toca-do-mamute', 'T', 6), ('gruta-do-casal', 'G', 6), ('ninho-do-pterodactilo', 'N', 5),
+             ('covil-dos-cacadores', 'C', 5), ('suite-do-chefe-da-tribo', 'S', 3)) AS v(slug, prefixo, qtd)
+JOIN caverna c ON c.slug = v.slug
+CROSS JOIN LATERAL generate_series(1, v.qtd) AS n;
 
 -- Comodidades
 INSERT INTO comodidade (id, nome, icone) VALUES
@@ -51,7 +56,9 @@ FROM (VALUES ('toca-do-mamute', 'fogueira-privativa'), ('toca-do-mamute', 'vista
              ('gruta-do-casal', 'banheira-de-pedra'), ('gruta-do-casal', 'vista-pro-vale'),
              ('covil-dos-cacadores', 'fogueira-privativa'), ('covil-dos-cacadores', 'rede-de-descanso'),
              ('suite-do-chefe-da-tribo', 'fogueira-privativa'), ('suite-do-chefe-da-tribo', 'banheira-de-pedra'),
-             ('suite-do-chefe-da-tribo', 'vista-pro-vale'), ('suite-do-chefe-da-tribo', 'berco-de-pele')
+             ('suite-do-chefe-da-tribo', 'vista-pro-vale'), ('suite-do-chefe-da-tribo', 'berco-de-pele'),
+             ('ninho-do-pterodactilo', 'rede-de-descanso'), ('ninho-do-pterodactilo', 'banheira-de-pedra'),
+             ('ninho-do-pterodactilo', 'vista-pro-vale')
      ) AS v(slug, comodidade)
 JOIN caverna c ON c.slug = v.slug;
 
@@ -92,6 +99,11 @@ INSERT INTO extra (id, nome, descricao, icone, preco_centavos, cobranca, incluso
 ('TRANSFER',         'Transfer',           'Ida e volta do aeroporto até o hotel',         'airport_shuttle',  18000, 'POR_ESTADIA', false, true),
 ('FESTA_DA_TRIBO',   'Festa da tribo',     'Decoração e bolo para uma comemoração',        'celebration',      35000, 'POR_ESTADIA', false, true),
 ('FOGUEIRA_VIP',     'Fogueira VIP',       'Noite de fogueira com lenha, petiscos e vinho', 'local_fire_department', 15000, 'POR_ESTADIA', false, true);
+
+-- Combos quarto + Banquete (jantar todas as noites da estadia). Criança até 5 anos não paga.
+INSERT INTO combo_banquete (id, nome, descricao, preco_adulto_centavos, preco_crianca_centavos) VALUES
+('JANTAR_DA_TRIBO',   'Jantar da tribo',   'Prato na fogueira + poção, todas as noites da estadia.',                    8900,  4500),
+('BANQUETE_COMPLETO', 'Banquete completo', 'Entrada, prato na fogueira, sobremesa e poção, todas as noites da estadia.', 13900, 6900);
 
 -- Cupom: 10% até o fim do ano
 INSERT INTO cupom (codigo, tipo, valor, valido_ate, usos_maximos, usos, ativo)
@@ -160,19 +172,23 @@ INSERT INTO item_cardapio (nome, descricao, preco_centavos, categoria, tags, ord
 ('Poção Verde',              'Suco de abacaxi com hortelã e gengibre.',                                  1800, 'POCOES',      ARRAY['Vegano'], 13),
 ('Poção do Pântano',         'Limonada com espinafre, maçã e limão.',                                    1900, 'POCOES',      ARRAY['Vegano', 'Kids'], 14);
 
-INSERT INTO horario_mesa (horario, capacidade_pessoas) VALUES
-(TIME '19:00', 40), (TIME '19:30', 40), (TIME '20:00', 40),
-(TIME '20:30', 40), (TIME '21:00', 40), (TIME '21:30', 40);
+-- Início das refeições no jantar. O salão comporta 50 pessoas ao mesmo tempo (application.yml).
+INSERT INTO horario_mesa (horario) VALUES
+(TIME '19:00'), (TIME '19:30'), (TIME '20:00'), (TIME '20:30'), (TIME '21:00'), (TIME '21:30');
 
 -- ---------------------------------------------------------------------
--- Usuária de teste: Marina Souza (senha: Uga!Buga2026)
--- Saldo de 450 ossos: 520 ganhos - 70 resgatados (nível Xamã, por acumulado >= 500).
+-- Usuários de teste
+--   Marina Souza (VISITANTE, senha: Uga!Buga2026)
+--   Administração do hotel (ADMIN, senha: Admin!Buga2026)
 -- ---------------------------------------------------------------------
 INSERT INTO usuario (nome, sobrenome, email, senha_hash, celular, pais, tipo_documento, numero_documento,
-                     data_nascimento, aceita_ofertas, saldo_ossos)
+                     data_nascimento, aceita_ofertas, role)
 VALUES ('Marina', 'Souza', 'marina.souza@example.com',
         '$2a$10$ngYwxpxYkGlUig5H1Zg5qewFVUZ35D7sQpb2yUfEYBJPXIi7Lm/g6',
-        '+55 11 98888-7777', 'BR', 'CPF', '12345678909', DATE '1989-04-12', true, 450);
+        '+55 11 98888-7777', 'BR', 'CPF', '12345678909', DATE '1989-04-12', true, 'VISITANTE'),
+       ('Recepção', 'Huga Buga', 'admin@hugabuga.example',
+        '$2a$10$CQ9QJMGVEPaGiP.F/GsboexdgUBU70K8W7OWsXH.FMrBqNCByLTPa',
+        '+55 11 4000-0000', 'BR', 'CPF', '00000000000', NULL, false, 'ADMIN');
 
 INSERT INTO membro_tribo (usuario_id, nome, tipo, data_nascimento, observacoes)
 SELECT u.id, v.nome, v.tipo, v.nascimento, v.obs
@@ -184,7 +200,3 @@ CROSS JOIN (VALUES
 ) AS v(nome, tipo, nascimento, obs)
 WHERE u.email = 'marina.souza@example.com';
 
-INSERT INTO movimento_ossos (usuario_id, quantidade, motivo)
-SELECT id, 520, 'GANHO_ESTADIA' FROM usuario WHERE email = 'marina.souza@example.com';
-INSERT INTO movimento_ossos (usuario_id, quantidade, motivo)
-SELECT id, -70, 'RESGATE' FROM usuario WHERE email = 'marina.souza@example.com';

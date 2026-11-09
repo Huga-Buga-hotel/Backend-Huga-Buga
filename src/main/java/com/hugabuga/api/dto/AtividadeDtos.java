@@ -20,6 +20,10 @@ public final class AtividadeDtos {
     public record CatalogoRes(List<AtividadeRes> itens, Map<String, Long> contagemPorCategoria) {}
 
     public record SessaoRes(UUID id, OffsetDateTime inicio, int vagasTotais, int vagasLivres, boolean esgotada) {}
+    /** Sessões de todas as atividades em um dia (seletor de dias da tela Experiências). */
+    public record SessaoDoDiaRes(UUID sessaoId, UUID atividadeId, String atividade, CategoriaAtividade categoria,
+                                 OffsetDateTime inicio, int duracaoMin, int precoCentavos, int vagasTotais,
+                                 int vagasLivres, boolean esgotada) {}
 
     public record AgendarReq(@NotNull UUID sessaoId, @Min(1) int quantidade) {}
 

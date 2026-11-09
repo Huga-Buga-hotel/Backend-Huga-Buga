@@ -16,25 +16,19 @@ class CancelamentoTest extends IntegrationTestBase {
 
     private final Solicitante cliente = anonimo("cliente@example.com");
 
-    private int saldoMarina() { return usuarioRepository.findById(marinaId()).orElseThrow().getSaldoOssos(); }
-
-    // ---------- dentro do prazo: grátis, reembolso integral, ossos voltam ----------
+    // ---------- dentro do prazo: grátis, reembolso integral ----------
 
     @Test
-    void dentroDoPrazoReembolsaTudoEDevolveOsOssos() {
+    void dentroDoPrazoReembolsaTudo() {
         Solicitante s = marina();
         ReservaRes r = criar(TOCA, dias(30), dias(33), 2, List.of(), s);
-        reservaService.usarOssos(r.codigo(), 100, s);
         pagamentoService.pagar(r.codigo(), cartao(CARTAO_APROVADO, 1), s);
-        assertEquals(350, saldoMarina());                       // 450 - 100
 
         CancelarRes c = reservaService.cancelar(r.codigo(), s);
 
         assertEquals(StatusReserva.CANCELADA, c.reserva().status());
-        assertEquals(155000, c.reembolsoCentavos());            // R$ 1.560 - R$ 10 de ossos
+        assertEquals(156000, c.reembolsoCentavos());            // 3 x R$ 520
         assertEquals(0, c.multaCentavos());
-        assertEquals(450, saldoMarina(), "os ossos usados voltam ao saldo");
-        assertEquals(520, movimentoRepository.somaGanhos(marinaId()), "devolver ossos não conta como ganho (nível não sobe)");
         assertNotNull(reserva(r.codigo()).getCanceladaEm());
     }
 
@@ -50,7 +44,7 @@ class CancelamentoTest extends IntegrationTestBase {
 
     @Test
     void cancelarLiberaATocaParaOutrosHospedes() {
-        for (int i = 0; i < 2; i++) criar(TOCA, dias(30), dias(33), 2, List.of(), anonimo("x" + i + "@example.com"));
+        for (int i = 0; i < tocas(TOCA) - 1; i++) criar(TOCA, dias(30), dias(33), 2, List.of(), anonimo("x" + i + "@example.com"));
         ReservaRes r = criar(TOCA, dias(30), dias(33), 2, List.of(), cliente);
         assertEquals(0, unidadeRepository.unidadesLivres(cavernaId(TOCA), dias(30), dias(33)).size());
 
@@ -81,18 +75,15 @@ class CancelamentoTest extends IntegrationTestBase {
     // ---------- fora do prazo: sem reembolso ----------
 
     @Test
-    void foraDoPrazoNaoReembolsaNemDevolveOssos() {
+    void foraDoPrazoNaoReembolsa() {
         Solicitante s = marina();
         ReservaRes r = criar(TOCA, dias(1), dias(3), 2, List.of(), s);   // check-in amanhã
-        reservaService.usarOssos(r.codigo(), 100, s);
         pagamentoService.pagar(r.codigo(), cartao(CARTAO_APROVADO, 1), s);
-        assertEquals(350, saldoMarina());
 
         CancelarRes c = reservaService.cancelar(r.codigo(), s);
 
         assertEquals(StatusReserva.CANCELADA, c.reserva().status());
         assertEquals(0, c.reembolsoCentavos());
-        assertEquals(350, saldoMarina(), "fora do prazo os ossos não voltam");
     }
 
     @Test

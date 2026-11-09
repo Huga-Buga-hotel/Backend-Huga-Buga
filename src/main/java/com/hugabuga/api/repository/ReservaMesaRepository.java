@@ -9,22 +9,18 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.*;
 import java.util.*;
-
 public interface ReservaMesaRepository extends JpaRepository<ReservaMesa, UUID> {
     Optional<ReservaMesa> findByCodigo(String codigo);
     List<ReservaMesa> findByReservaId(UUID reservaId);
     List<ReservaMesa> findByUsuarioId(UUID usuarioId);
+    List<ReservaMesa> findByReservaIdAndOrigem(UUID reservaId, OrigemMesa origem);
+    List<ReservaMesa> findByDataOrderByHorario(LocalDate data);
 
-    /** Pessoas já reservadas (só CONFIRMADA) em uma data/horário. */
-    default int somaPessoas(LocalDate data, LocalTime horario) {
-        Long soma = somarPessoasConfirmadas(data, horario);
-        return soma == null ? 0 : soma.intValue();
-    }
-
+    /** Mesas que ocupam lugar no salão naquele dia: PENDENTE (combo em checkout) e CONFIRMADA. */
     @Query("""
-            select coalesce(sum(m.pessoas), 0) from ReservaMesa m
-            where m.data = :data and m.horario = :horario
-              and m.status = com.hugabuga.api.model.StatusMesa.CONFIRMADA
+            select m from ReservaMesa m
+            where m.data = :data
+              and m.status in (com.hugabuga.api.model.StatusMesa.PENDENTE, com.hugabuga.api.model.StatusMesa.CONFIRMADA)
             """)
-    Long somarPessoasConfirmadas(@Param("data") LocalDate data, @Param("horario") LocalTime horario);
+    List<ReservaMesa> ocupandoNoDia(@Param("data") LocalDate data);
 }

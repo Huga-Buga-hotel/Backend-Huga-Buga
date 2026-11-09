@@ -10,7 +10,7 @@ import org.springframework.data.repository.query.Param;
 import java.time.*;
 import java.util.*;
 
-public interface ReservaRepository extends JpaRepository<Reserva, UUID> {
+public interface ReservaRepository extends JpaRepository<Reserva, UUID>, JpaSpecificationExecutor<Reserva> {
 
     Optional<Reserva> findByCodigo(String codigo);
 
@@ -23,6 +23,34 @@ public interface ReservaRepository extends JpaRepository<Reserva, UUID> {
 
     /** Job de expiração: PENDENTE vencidas. */
     List<Reserva> findByStatusAndExpiraEmBefore(StatusReserva status, OffsetDateTime limite);
+
+    /** Reservas que seguram unidades da caverna em alguma noite do período [de, ate): calendário de disponibilidade. */
+    @Query("""
+            select r from Reserva r
+            where r.cavernaId = :cavernaId
+              and r.status in (com.hugabuga.api.model.StatusReserva.PENDENTE,
+                               com.hugabuga.api.model.StatusReserva.AGUARDANDO_PAGAMENTO,
+                               com.hugabuga.api.model.StatusReserva.CONFIRMADA)
+              and r.checkIn < :ate and r.checkOut > :de
+            """)
+    List<Reserva> ativasNoPeriodo(@Param("cavernaId") UUID cavernaId, @Param("de") LocalDate de, @Param("ate") LocalDate ate);
+
+    /** Tocas ocupadas no hotel inteiro em uma noite (painel do admin). */
+    @Query("""
+            select r from Reserva r
+            where r.status in (com.hugabuga.api.model.StatusReserva.PENDENTE,
+                               com.hugabuga.api.model.StatusReserva.AGUARDANDO_PAGAMENTO,
+                               com.hugabuga.api.model.StatusReserva.CONFIRMADA)
+              and r.checkIn <= :noite and r.checkOut > :noite
+            """)
+    List<Reserva> ativasNaNoite(@Param("noite") LocalDate noite);
+
+    // Consultas explícitas: por nome, "findByCheckIn..." seria lido como "check IN (...)".
+    @Query("select r from Reserva r where r.checkIn = :data and r.status = :status order by r.codigo")
+    List<Reserva> entradasDoDia(@Param("data") LocalDate data, @Param("status") StatusReserva status);
+
+    @Query("select r from Reserva r where r.checkOut = :data and r.status = :status order by r.codigo")
+    List<Reserva> saidasDoDia(@Param("data") LocalDate data, @Param("status") StatusReserva status);
 
     /** Job de conclusão: CONFIRMADA com check-out já passado. */
     List<Reserva> findByStatusAndCheckOutBefore(StatusReserva status, LocalDate limite);

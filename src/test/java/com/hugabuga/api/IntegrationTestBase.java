@@ -1,9 +1,8 @@
 package com.hugabuga.api;
 
 import com.hugabuga.api.dto.PagamentoDtos.PagamentoReq;
-import com.hugabuga.api.dto.ReservaDtos.CriarReservaReq;
-import com.hugabuga.api.dto.ReservaDtos.ReservaRes;
-import com.hugabuga.api.dto.ReservaDtos.Solicitante;
+import com.hugabuga.api.dto.ReservaDtos.*;
+import com.hugabuga.api.model.TipoHospede;
 import com.hugabuga.api.erro.ApiException;
 import com.hugabuga.api.model.MetodoPagamento;
 import com.hugabuga.api.model.Reserva;
@@ -35,8 +34,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * Por que PostgreSQL e não H2: a proteção contra reserva dupla é uma restrição de exclusão (btree_gist),
  * que não existe no H2.
  *
- * Usa os dados do V2: Toca do Mamute (T-07, T-08, T-09, R$ 520/noite, capacidade 5), cupom UGABUGA10 e a
- * Marina (450 ossos). Os testes usam datas relativas a hoje para não "envelhecerem".
+ * Usa os dados do V2: Toca do Mamute (6 tocas, T-01 a T-06, R$ 520/noite, capacidade 5), cupom UGABUGA10,
+ * a Marina (VISITANTE) e o admin. Os testes usam datas relativas a hoje para não "envelhecerem".
  *
  * Se estiver no Testcontainers 1.x, troque o import por org.testcontainers.containers.PostgreSQLContainer.
  */
@@ -49,14 +48,23 @@ public abstract class IntegrationTestBase {
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(DockerImageName.parse("postgres:16-alpine"));
     static { POSTGRES.start(); }
 
+    /** Fotos das avaliações vão para uma pasta temporária, nunca para ./uploads do projeto. */
+    static final java.nio.file.Path UPLOADS;
+    static {
+        try { UPLOADS = java.nio.file.Files.createTempDirectory("hugabuga-uploads-teste"); }
+        catch (java.io.IOException e) { throw new IllegalStateException(e); }
+    }
+
     @DynamicPropertySource
     static void propriedades(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", POSTGRES::getUsername);
         registry.add("spring.datasource.password", POSTGRES::getPassword);
+        registry.add("hugabuga.uploads.dir", UPLOADS::toString);
     }
 
     protected static final String EMAIL_MARINA = "marina.souza@example.com";
+    protected static final String EMAIL_ADMIN = "admin@hugabuga.example";
     protected static final String TOCA = "toca-do-mamute";
     protected static final String CARTAO_APROVADO = "4111111111111111"; // Visa de teste, válido no Luhn
     protected static final String CARTAO_SALDO_INSUFICIENTE = "4000000000000002"; // final 0002
@@ -75,7 +83,7 @@ public abstract class IntegrationTestBase {
     @Autowired protected UsuarioRepository usuarioRepository;
     @Autowired protected PagamentoRepository pagamentoRepository;
     @Autowired protected CupomRepository cupomRepository;
-    @Autowired protected MovimentoOssosRepository movimentoRepository;
+    @Autowired protected ReservaMesaRepository mesaRepository;
 
     /** Os feriados do seed poderiam cair nas datas de teste e mudar os valores: cada teste parte sem tarifas. */
     @BeforeEach
@@ -94,11 +102,24 @@ public abstract class IntegrationTestBase {
 
     protected Solicitante anonimo(String email) { return new Solicitante(null, email); }
 
+    protected UUID adminId() { return usuarioRepository.findByEmailIgnoreCase(EMAIL_ADMIN).orElseThrow().getId(); }
+
+    protected Solicitante admin() { return new Solicitante(adminId(), null, true); }
+
+    /** Quantas tocas ativas a caverna tem (a Toca do Mamute tem 6). */
+    protected int tocas(String slug) { return (int) unidadeRepository.countByCavernaIdAndAtivaTrue(cavernaId(slug)); }
+
     protected UUID cavernaId(String slug) { return cavernaRepository.findBySlugAndAtivaTrue(slug).orElseThrow().getId(); }
 
+    /** Cria a reserva e já preenche o passo 1 (responsável e hóspedes), como o front faz antes de pagar. */
     protected ReservaRes criar(String slug, LocalDate in, LocalDate out, int adultos, List<Integer> idades, Solicitante s) {
         String email = s.usuarioId() == null ? s.email() : null;
-        return reservaService.criar(new CriarReservaReq(cavernaId(slug), in, out, adultos, idades, email, null), s);
+        ReservaRes r = reservaService.criar(new CriarReservaReq(cavernaId(slug), in, out, adultos, idades, email, null), s);
+        List<HospedeDto> hospedes = new java.util.ArrayList<>();
+        for (int i = 1; i <= adultos; i++) hospedes.add(new HospedeDto("Adulto " + i, TipoHospede.ADULTO, null));
+        for (int i = 0; i < idades.size(); i++) hospedes.add(new HospedeDto("Criança " + (i + 1), TipoHospede.CRIANCA, idades.get(i)));
+        return reservaService.salvarHospedes(r.codigo(), new HospedesReq("Responsável Teste", r.responsavelEmail(),
+                "+5511999990000", "BR", "CPF", "52998224725", null, hospedes), s);
     }
 
     /** Toca do Mamute, 2 adultos, 3 noites (R$ 1.560,00), 30 dias à frente. */

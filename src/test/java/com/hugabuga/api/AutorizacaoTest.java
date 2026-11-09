@@ -19,7 +19,9 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -127,9 +129,48 @@ class AutorizacaoTest extends IntegrationTestBase {
                 .andExpect(status().isUnauthorized())
                 .andExpect(content().string(containsString("\"codigo\":\"NAO_AUTENTICADO\"")));
 
-        mvc.perform(post("/api/v1/reservas/" + codigoDaMarina + "/ossos")
-                        .contentType(MediaType.APPLICATION_JSON).content("{\"quantidade\":10}"))
+        mvc.perform(multipart("/api/v1/reservas/" + codigoDaMarina + "/relato").param("nota", "5"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    // ---------- roles: VISITANTE x ADMIN ----------
+
+    @Test
+    void visitanteNaoEntraNoPainelAdmin() throws Exception {
+        mvc.perform(get("/api/v1/admin/dashboard")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/admin/dashboard").header("Authorization", bearer(tokenMarina)))
+                .andExpect(status().isForbidden())
+                .andExpect(content().string(containsString("SEM_PERMISSAO")));
+    }
+
+    @Test
+    void adminEntraNoPainelEVeQualquerReserva() throws Exception {
+        String tokenAdmin = jwtService.gerarAcesso(usuarioRepository.findById(adminId()).orElseThrow());
+        mvc.perform(get("/api/v1/admin/dashboard").header("Authorization", bearer(tokenAdmin)))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"tocasTotal\":25")));
+        mvc.perform(get("/api/v1/reservas/" + codigoDaMarina).header("Authorization", bearer(tokenAdmin)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void loginDevolveORole() throws Exception {
+        mvc.perform(post("/api/v1/auth/login").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"admin@hugabuga.example\",\"senha\":\"Admin!Buga2026\"}"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("\"role\":\"ADMIN\"")));
+    }
+
+    @Test
+    void cadastroNasceVisitante() {
+        assertEquals(com.hugabuga.api.model.Role.VISITANTE,
+                usuarioRepository.findByEmailIgnoreCase("outro.hospede@example.com").orElseThrow().getRole());
+    }
+
+    @Test
+    void swaggerEstaPublico() throws Exception {
+        mvc.perform(get("/v3/api-docs")).andExpect(status().isOk())
+                .andExpect(content().string(containsString("Huga Buga Hotel API")));
     }
 
     @Test

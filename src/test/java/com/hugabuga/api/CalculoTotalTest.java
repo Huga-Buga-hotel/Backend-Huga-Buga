@@ -1,7 +1,6 @@
 package com.hugabuga.api;
 
 import com.hugabuga.api.dto.ReservaDtos.*;
-import com.hugabuga.api.model.Usuario;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 
@@ -9,7 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Teste 1: diárias + extras − cupom − ossos, parcelas e Pix (exemplo do guia). */
+/** Teste 1: diárias + extras − cupom, parcelas e Pix (exemplo do guia). */
 class CalculoTotalTest extends IntegrationTestBase {
 
     @Test
@@ -46,44 +45,6 @@ class CalculoTotalTest extends IntegrationTestBase {
         r = reservaService.removerCupom(r.codigo(), s);
         assertEquals(156000, r.total());
         assertNull(r.cupom());
-    }
-
-    @Test
-    void ossosAbatemDoTotalMasSoSaemDoSaldoNaConfirmacao() {
-        Solicitante s = marina();
-        ReservaRes r = criarPadrao(s);
-        r = reservaService.usarOssos(r.codigo(), 100, s);      // 100 ossos = R$ 10
-        assertEquals(100, r.ossosUsados());
-        assertEquals(155000, r.total());
-        assertEquals(450, usuarioRepository.findById(marinaId()).orElseThrow().getSaldoOssos()); // ainda não debitou
-
-        r = reservaService.desfazerOssos(r.codigo(), s);
-        assertEquals(0, r.ossosUsados());
-        assertEquals(156000, r.total());
-    }
-
-    @Test
-    void ossosCobremNoMaximo50PorCentoDoTotal() {
-        Usuario u = usuarioRepository.findById(marinaId()).orElseThrow();
-        u.setSaldoOssos(100_000);
-        usuarioRepository.saveAndFlush(u);
-
-        Solicitante s = marina();
-        ReservaRes criada = criarPadrao(s); // R$ 1.560,00 -> limite de R$ 780,00 = 7.800 ossos
-
-        var e = erro(() -> reservaService.usarOssos(criada.codigo(), 8000, s));
-        assertErro(e, HttpStatus.BAD_REQUEST, "VALIDACAO");
-
-        ReservaRes r = reservaService.usarOssos(criada.codigo(), 7800, s);
-        assertEquals(78000, r.total());
-    }
-
-    @Test
-    void ossosSoEmMultiplosDeDezEAteOSaldo() {
-        Solicitante s = marina();
-        ReservaRes r = criarPadrao(s);
-        assertErro(erro(() -> reservaService.usarOssos(r.codigo(), 15, s)), HttpStatus.BAD_REQUEST, "VALIDACAO");
-        assertErro(erro(() -> reservaService.usarOssos(r.codigo(), 460, s)), HttpStatus.BAD_REQUEST, "VALIDACAO"); // saldo é 450
     }
 
     @Test

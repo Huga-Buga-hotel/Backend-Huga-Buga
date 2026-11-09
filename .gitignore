@@ -31,3 +31,11 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Projeto ###
+# Variáveis de ambiente locais (use .env.example como modelo)
+.env
+# Fotos enviadas nas avaliações (armazenamento local)
+uploads/
+# Contexto do Claude Code (local, não versionado)
+CLAUDE.md

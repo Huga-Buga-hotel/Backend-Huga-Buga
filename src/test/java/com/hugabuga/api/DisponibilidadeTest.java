@@ -42,27 +42,39 @@ class DisponibilidadeTest extends IntegrationTestBase {
     }
 
     @Test
-    void cadaReservaPegaUmaTocaDiferenteEAQuartaFicaSemDisponibilidade() {
-        for (int i = 0; i < 3; i++) criar(TOCA, in, out, 2, List.of(), anonimo("t" + i + "@example.com"));
+    void cadaReservaPegaUmaTocaDiferenteEAProximaFicaSemDisponibilidade() {
+        for (int i = 0; i < tocas(TOCA); i++) criar(TOCA, in, out, 2, List.of(), anonimo("t" + i + "@example.com"));
 
-        var e = erro(() -> criar(TOCA, in, out, 2, List.of(), anonimo("t4@example.com")));
+        var e = erro(() -> criar(TOCA, in, out, 2, List.of(), anonimo("extra@example.com")));
         assertErro(e, HttpStatus.CONFLICT, "SEM_DISPONIBILIDADE");
         assertNotNull(e.getDados().get("sugestoes"), "deve devolver datas sugeridas, nunca um erro genérico");
     }
 
     @Test
-    void asTresReservasUsamUnidadesDistintas() {
+    void asReservasUsamUnidadesDistintas() {
         List<String> unidades = new java.util.ArrayList<>();
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < tocas(TOCA); i++) {
             unidades.add(criar(TOCA, in, out, 2, List.of(), anonimo("t" + i + "@example.com")).unidadeCodigo());
         }
-        assertEquals(3, unidades.stream().distinct().count());
-        assertTrue(unidades.containsAll(List.of("T-07", "T-08", "T-09")));
+        assertEquals(6, unidades.stream().distinct().count());
+        assertTrue(unidades.containsAll(List.of("T-01", "T-02", "T-03", "T-04", "T-05", "T-06")));
+    }
+
+    @Test
+    void hotelTem25TocasEm5Suites() {
+        assertEquals(5, cavernaRepository.findByAtivaTrue().size());
+        assertEquals(25, unidadeRepository.count());
     }
 
     @Test
     void buscaMostraUltimasQuandoRestam2OuMenos() {
-        criar(TOCA, in, out, 2, List.of(), anonimo("a@example.com")); // restam 2 de 3
+        for (int i = 0; i < tocas(TOCA) - 3; i++) criar(TOCA, in, out, 2, List.of(), anonimo("x" + i + "@example.com"));
+        CavernaCardRes antes = cavernaService.buscar(busca(null)).itens().stream()
+                .filter(c -> c.slug().equals(TOCA)).findFirst().orElseThrow();
+        assertEquals(3, antes.unidadesLivres());
+        assertFalse(antes.ultimas());
+
+        criar(TOCA, in, out, 2, List.of(), anonimo("a@example.com")); // restam 2
         BuscaRes res = cavernaService.buscar(busca(null));
         CavernaCardRes toca = res.itens().stream().filter(c -> c.slug().equals(TOCA)).findFirst().orElseThrow();
         assertEquals(2, toca.unidadesLivres());
@@ -75,7 +87,7 @@ class DisponibilidadeTest extends IntegrationTestBase {
 
     @Test
     void cavernaSemTocaLivreSaiDaBuscaESugerePeriodosProximos() {
-        for (int i = 0; i < 3; i++) criar(TOCA, in, out, 2, List.of(), anonimo("t" + i + "@example.com"));
+        for (int i = 0; i < tocas(TOCA); i++) criar(TOCA, in, out, 2, List.of(), anonimo("t" + i + "@example.com"));
 
         // só a Toca é FAMILIA: nada livre -> itens vazio e sugestões preenchidas
         BuscaRes res = cavernaService.buscar(busca(List.of(CategoriaCaverna.FAMILIA)));

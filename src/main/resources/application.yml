@@ -2,6 +2,7 @@
 # Huga Buga Hotel - configuração base
 # Segredos e conexão vêm de VARIÁVEIS DE AMBIENTE (nunca versionar valores reais).
 #   DB_URL, DB_USER, DB_PASSWORD, JWT_SEGREDO (mínimo 32 caracteres)
+#   Opcionais: CORS_ORIGENS, UPLOADS_DIR
 # Para desenvolvimento local use o perfil "dev" (application-dev.yml):
 #   mvn spring-boot:run -Dspring-boot.run.profiles=dev
 # =====================================================================
@@ -28,9 +29,30 @@ spring:
 
   jackson:
     time-zone: America/Sao_Paulo
+    deserialization:
+      # Jackson 3 (Spring Boot 4) recusa por padrão campo primitivo ausente no JSON. Aqui um boolean/int que o
+      # front não mandar (ex.: "lembrar", "pertoFogueira", "cadeirinhas") vale false/0, como nos DTOs.
+      fail-on-null-for-primitives: false
+
+  # Upload das fotos das avaliações. O padrão do Spring é 1 MB por arquivo.
+  servlet:
+    multipart:
+      max-file-size: 25MB          # por imagem
+      max-request-size: 130MB      # 5 imagens de 25 MB + os campos do formulário
+
+# Swagger UI em /api/v1/docs (redireciona para /swagger-ui/index.html); JSON em /v3/api-docs
+springdoc:
+  swagger-ui:
+    path: /api/v1/docs
+    operations-sorter: method
+    tags-sorter: alpha
+    persist-authorization: true    # mantém o token entre recargas da página
+  default-produces-media-type: application/json
 
 server:
   port: 8080
+  tomcat:
+    max-swallow-size: 130MB        # deixa o Tomcat ler o upload grande e responder 413 com o nosso JSON
   error:                           # nunca expor detalhes internos ao cliente
     include-stacktrace: never
     include-message: never
@@ -52,6 +74,11 @@ hugabuga:
   cors:
     origens: ${CORS_ORIGENS:http://localhost:3000,http://localhost:5173}
 
+  # Onde as fotos das avaliações são gravadas (no Docker: volume em /app/uploads)
+  uploads:
+    dir: ${UPLOADS_DIR:./uploads}
+    max-fotos-por-avaliacao: 5
+
   # Turnos do Banquete (entre aspas: o YAML leria 07:00 como número)
   restaurante:
     cafe-inicio: "07:00"
@@ -60,12 +87,19 @@ hugabuga:
     almoco-fim: "15:00"
     jantar-inicio: "19:00"
     jantar-fim: "23:00"
+    capacidade-pessoas: 50         # lugares no salão ao mesmo tempo
+    duracao-mesa-minutos: 90       # quanto tempo uma mesa fica ocupada (para somar horários sobrepostos)
+    antecedencia-max-dias: 60      # até quando um visitante de fora pode reservar
 
   # Regras de negócio ajustáveis
   regras:
     hold-minutos: 15               # tempo que a toca fica segurada
+    min-noites: 1                  # tempo de estadia mínimo
+    max-noites: 30                 # tempo de estadia máximo
+    antecedencia-max-dias: 365     # até quando dá para reservar uma toca
     prorrogacao-minutos: 10        # o "+10 min" (uma única vez)
     adulto-extra-centavos: 6000    # R$ 60 por adulto a mais, por noite
     pix-percentual: 5              # desconto do Pix
     pix-minutos: 10                # validade do código Pix
     desconto-hospede-pct: 15       # desconto de hóspede no Banquete
+    redefinir-senha-minutos: 30    # validade do link de "esqueci a senha"

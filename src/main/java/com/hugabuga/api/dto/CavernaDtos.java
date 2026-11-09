@@ -1,6 +1,7 @@
 package com.hugabuga.api.dto;
 
 import com.hugabuga.api.model.CategoriaCaverna;
+import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -38,7 +39,22 @@ public final class CavernaDtos {
     public record CavernaDetalheRes(CavernaCardRes caverna, String descricao, List<FotoRes> fotos,
                                     List<ComodidadeRes> comodidades) {}
 
-    public record RelatoRes(int nota, String texto, String autor, OffsetDateTime criadoEm) {}
+    @Schema(description = "Avaliação (relato) de uma estadia: nota de 1 a 5, comentário e fotos.")
+    public record RelatoRes(UUID id, int nota, String texto, String autor, OffsetDateTime criadoEm,
+                            @Schema(description = "URLs relativas das fotos (GET /api/v1/arquivos/relatos/{arquivo}).")
+                            List<String> fotos) {}
+
+    @Schema(description = "Uma noite do calendário de disponibilidade.")
+    public record DiaDisponibilidadeRes(LocalDate data, int unidadesLivres, int totalUnidades, boolean disponivel,
+                                        int precoNoiteCentavos, boolean feriado) {}
+
+    public record OpcaoContagemRes(String valor, long quantidade) {}
+
+    @Schema(description = "Tudo o que a barra de filtros precisa, mais as regras de tempo de estadia.")
+    public record FiltrosRes(List<OpcaoContagemRes> categorias, int precoMinCentavos, int precoMaxCentavos,
+                             List<ComodidadeRes> comodidades, int capacidadeMaxima, List<String> ordens,
+                             int minNoites, int maxNoites, int antecedenciaMaxDias,
+                             String horarioCheckIn, String horarioCheckOut) {}
 
     public record PaginaRes<T>(List<T> itens, int page, int size, long total) {}
 }

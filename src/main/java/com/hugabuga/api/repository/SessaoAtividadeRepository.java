@@ -12,6 +12,7 @@ import java.util.*;
 
 public interface SessaoAtividadeRepository extends JpaRepository<SessaoAtividade, UUID> {
 
+    List<SessaoAtividade> findByInicioGreaterThanEqualAndInicioLessThanOrderByInicio(OffsetDateTime de, OffsetDateTime ate);
     List<SessaoAtividade> findByAtividadeIdAndInicioBetweenOrderByInicio(UUID atividadeId,
                                                                          OffsetDateTime de, OffsetDateTime ate);
 

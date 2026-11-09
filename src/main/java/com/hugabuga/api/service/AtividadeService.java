@@ -60,6 +60,33 @@ public class AtividadeService {
                 .map(this::toRes).toList();
     }
 
+    /** Todas as sessões de um dia (seletor de dias da tela Experiências), com vagas. */
+    @Transactional(readOnly = true)
+    public List<SessaoDoDiaRes> sessoesDoDia(LocalDate data, CategoriaAtividade categoria) {
+        LocalDate dia = data != null ? data : Util.hoje();
+        Map<UUID, Atividade> ativas = atividades.findByAtivaTrue().stream()
+                .filter(a -> categoria == null || a.getCategoria() == categoria)
+                .collect(Collectors.toMap(Atividade::getId, a -> a));
+        OffsetDateTime ini = dia.atStartOfDay(Util.FUSO).toOffsetDateTime();
+        OffsetDateTime fim = dia.plusDays(1).atStartOfDay(Util.FUSO).toOffsetDateTime();
+        return sessoes.findByInicioGreaterThanEqualAndInicioLessThanOrderByInicio(ini, fim).stream()
+                .filter(x -> ativas.containsKey(x.getAtividadeId()))
+                .map(x -> {
+                    Atividade a = ativas.get(x.getAtividadeId());
+                    int livres = x.getVagasTotais() - x.getVagasOcupadas();
+                    return new SessaoDoDiaRes(x.getId(), a.getId(), a.getNome(), a.getCategoria(), x.getInicio(),
+                            a.getDuracaoMin(), a.getPrecoCentavos(), x.getVagasTotais(), livres, livres <= 0);
+                }).toList();
+    }
+
+    /** Home: atividades em destaque (as que têm selo primeiro). */
+    @Transactional(readOnly = true)
+    public List<AtividadeRes> destaques(int quantidade) {
+        return atividades.findByAtivaTrue().stream()
+                .sorted(Comparator.comparing((Atividade a) -> a.getDestaque() == null).thenComparing(Atividade::getNome))
+                .limit(quantidade).map(this::toRes).toList();
+    }
+
     @Transactional
     public AgendamentoRes agendar(String codigo, AgendarReq req, Solicitante s) {
         Reserva r = reservaService.carregarDonoParaEscrita(codigo, s);

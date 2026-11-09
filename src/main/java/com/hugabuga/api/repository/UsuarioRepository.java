@@ -13,4 +13,6 @@ import java.util.*;
 public interface UsuarioRepository extends JpaRepository<Usuario, UUID> {
     Optional<Usuario> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
+    /** Busca do painel do admin (nome ou e-mail). */
+    Page<Usuario> findByNomeContainingIgnoreCaseOrEmailContainingIgnoreCase(String nome, String email, Pageable pageable);
 }

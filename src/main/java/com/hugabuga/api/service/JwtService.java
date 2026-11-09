@@ -1,7 +1,9 @@
 package com.hugabuga.api.service;
 
 import com.hugabuga.api.erro.ApiException;
+import com.hugabuga.api.model.Role;
 import com.hugabuga.api.model.Usuario;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
@@ -26,6 +28,9 @@ import java.util.UUID;
 @Service
 public class JwtService {
 
+    /** O que o token de acesso carrega: quem é e qual o papel. */
+    public record Sessao(UUID usuarioId, Role role) {}
+
     private final SecretKey chave;
     private final long acessoMinutos;
     private final long refreshDias;
@@ -45,17 +50,22 @@ public class JwtService {
         return Jwts.builder()
                 .subject(u.getId().toString())
                 .claim("email", u.getEmail())
+                .claim("role", u.getRole().name())
                 .issuedAt(Date.from(agora))
                 .expiration(Date.from(agora.plus(Duration.ofMinutes(acessoMinutos))))
                 .signWith(chave)
                 .compact();
     }
 
-    /** Valida o token e devolve o id do usuário. Vencido: SESSAO_EXPIRADA. Qualquer outro problema: NAO_AUTENTICADO. */
-    public UUID validarEExtrairUsuario(String token) {
+    /**
+     * Valida o token e devolve o usuário e o papel. Vencido: SESSAO_EXPIRADA. Qualquer outro problema: NAO_AUTENTICADO.
+     * Uma troca de papel feita pelo admin vale a partir do próximo token (no máximo 15 min).
+     */
+    public Sessao validar(String token) {
         try {
-            String sub = Jwts.parser().verifyWith(chave).build().parseSignedClaims(token).getPayload().getSubject();
-            return UUID.fromString(sub);
+            Claims c = Jwts.parser().verifyWith(chave).build().parseSignedClaims(token).getPayload();
+            String role = c.get("role", String.class);
+            return new Sessao(UUID.fromString(c.getSubject()), role == null ? Role.VISITANTE : Role.valueOf(role));
         } catch (ExpiredJwtException e) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "SESSAO_EXPIRADA", "Uga! Sua sessão acabou.",
                     "Sua sessão expirou. Nada foi alterado. Entre novamente para continuar.");

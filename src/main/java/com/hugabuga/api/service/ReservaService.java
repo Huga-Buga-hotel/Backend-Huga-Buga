@@ -18,17 +18,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
-/** Todo o checkout: criar, hóspedes, extras, cupom, ossos, voucher, cancelar, alterar datas, check-in e relato. */
+/** Todo o checkout: criar, hóspedes, extras, combo do Banquete, cupom, voucher, cancelar, alterar datas e check-in. */
 @Service
 @RequiredArgsConstructor
 public class ReservaService {
 
     private static final String LATE_CHECKOUT_ID = "LATE_CHECKOUT";
-    private static final int OSSO_CENTAVOS = 10;      // 10 ossos = R$ 1
+    private static final int IDADE_GRATIS_MAX = 5;     // combo: até 5 anos não paga
+    private static final int IDADE_CRIANCA_MAX = 12;   // combo: 6 a 12 paga preço de criança; acima, de adulto
     private static final int PRAZO_DIAS = 2;          // cancelar / alterar
     private static final int CHECKIN_DIAS = 3;        // check-in online libera 3 dias antes
 
@@ -53,9 +55,9 @@ public class ReservaService {
     private final ReservaExtraRepository reservaExtras;
     private final CupomRepository cupons;
     private final UsuarioRepository usuarios;
-    private final MovimentoOssosRepository movimentos;
-    private final RelatoRepository relatos;
     private final PagamentoRepository pagamentos;
+    private final ComboBanqueteRepository combos;
+    private final OcupacaoBanqueteService ocupacaoBanquete;
     private final AgendamentoAtividadeRepository agendamentos;
     private final SessaoAtividadeRepository sessoes;
     private final ReservaMesaRepository mesas;
@@ -68,19 +70,13 @@ public class ReservaService {
     // Cálculo de valores: ÚNICO lugar com a conta do total
     // =====================================================================
 
-    /** Ordem: diárias + extras − cupom − ossos. O desconto do Pix é aplicado por último, só no pagamento. */
+    /** Ordem: diárias + extras + combo − cupom. O desconto do Pix é aplicado por último, só no pagamento. */
     private void recalcular(Reserva r) {
         Cupom cupom = r.getCupomId() == null ? null : cupons.findById(r.getCupomId()).orElse(null);
-        int bruto = r.getValorDiarias() + r.getValorExtras();
+        int bruto = r.getValorDiarias() + r.getValorExtras() + r.getValorCombo();
         int descontoCupom = descontoCupom(cupom, bruto);
-        int baseOssos = bruto - descontoCupom;
-        // ossos: até 50% do total, em múltiplos de 10
-        int maxOssos = (baseOssos / 2) / OSSO_CENTAVOS;
-        maxOssos = (maxOssos / 10) * 10;
-        int ossos = Math.min(r.getOssosUsados(), maxOssos);
         r.setDesconto(descontoCupom);
-        r.setOssosUsados(ossos);
-        r.setTotal(baseOssos - ossos * OSSO_CENTAVOS);
+        r.setTotal(bruto - descontoCupom);
         r.setAtualizadoEm(Util.agora());
     }
 
@@ -146,7 +142,7 @@ public class ReservaService {
         r.setResponsavelEmail(email.trim().toLowerCase());
         r.setValorDiarias(cot.valorDiariasCentavos()); // preço congelado agora
         r.setValorExtras(0);
-        r.setOssosUsados(0);
+        r.setValorCombo(0);
         r.setLateCheckout(false);
         r.setCriadoEm(Util.agora());
         recalcular(r);
@@ -195,6 +191,11 @@ public class ReservaService {
         r.setResponsavelTipoDocumento(req.tipoDocumento().toUpperCase());
         r.setResponsavelDocumento(req.documento());
         r.setPedidoEspecial(req.pedidoEspecial());
+        if (r.getComboId() != null) { // a tribo mudou: o combo é recalculado e as mesas ajustadas ao novo tamanho
+            hospedes.flush();
+            reservarMesasCombo(r, StatusMesa.PENDENTE);
+            r.setValorCombo(valorCombo(r, combo(r.getComboId())));
+        }
         recalcular(r);
         reservas.save(r);
         return toRes(r);
@@ -264,7 +265,7 @@ public class ReservaService {
     }
 
     // =====================================================================
-    // Passo 3: cupom e ossos
+    // Passo 3: cupom
     // =====================================================================
 
     @Transactional
@@ -289,37 +290,54 @@ public class ReservaService {
         return toRes(r);
     }
 
+    // =====================================================================
+    // Passo 2 (continuação): combo quarto + Banquete
+    // =====================================================================
+
+    @Transactional(readOnly = true)
+    public List<ComboRes> listarCombos() {
+        return combos.findByAtivoTrueOrderByPrecoAdultoCentavos().stream()
+                .map(c -> new ComboRes(c.getId(), c.getNome(), c.getDescricao(), c.getPrecoAdultoCentavos(),
+                        c.getPrecoCriancaCentavos())).toList();
+    }
+
+    /**
+     * Escolhe o combo: jantar no Banquete todas as noites, no mesmo horário. As mesas já são reservadas agora
+     * (PENDENTE, segurando lugar no salão como a toca é segurada) e viram CONFIRMADA no pagamento.
+     */
     @Transactional
-    public ReservaRes usarOssos(String codigo, int quantidade, Solicitante s) {
-        if (s.usuarioId() == null) throw Util.naoAutenticado();
+    public ReservaRes definirCombo(String codigo, ComboReq req, Solicitante s) {
         Reserva r = carregarDonoParaEscrita(codigo, s);
         exigirStatus(r, StatusReserva.PENDENTE);
-        if (!s.usuarioId().equals(r.getUsuarioId())) throw Util.semPermissao();
-        if (quantidade <= 0 || quantidade % 10 != 0) throw Util.validacao("O resgate é em múltiplos de 10 ossos.");
-        Usuario u = usuarios.findById(s.usuarioId()).orElseThrow(Util::naoAutenticado);
-        if (quantidade > u.getSaldoOssos()) {
-            throw Util.validacao("Você tem " + u.getSaldoOssos() + " ossos e tentou usar " + quantidade + ".");
+        if (r.getResponsavelNome() == null) {
+            throw Util.validacao("Preencha quem vem pra caverna (passo 1) antes de escolher o combo.");
         }
-        int baseOssos = r.getValorDiarias() + r.getValorExtras() - r.getDesconto();
-        if ((long) quantidade * OSSO_CENTAVOS > baseOssos / 2) {
-            throw Util.validacao("Os ossos podem cobrir no máximo 50% do total da reserva.");
-        }
-        r.setOssosUsados(quantidade); // só é debitado do saldo quando a reserva for confirmada
+        ComboBanquete c = combo(req.comboId());
+        r.setComboId(c.getId());
+        r.setComboHorario(req.horario());
+        reservarMesasCombo(r, StatusMesa.PENDENTE);
+        r.setValorCombo(valorCombo(r, c));
         recalcular(r);
         reservas.save(r);
         return toRes(r);
     }
 
     @Transactional
-    public ReservaRes desfazerOssos(String codigo, Solicitante s) {
-        if (s.usuarioId() == null) throw Util.naoAutenticado();
+    public ReservaRes removerCombo(String codigo, Solicitante s) {
         Reserva r = carregarDonoParaEscrita(codigo, s);
         exigirStatus(r, StatusReserva.PENDENTE);
-        r.setOssosUsados(0);
+        cancelarMesasCombo(r);
+        r.setComboId(null);
+        r.setComboHorario(null);
+        r.setValorCombo(0);
         recalcular(r);
         reservas.save(r);
         return toRes(r);
     }
+
+    /** Libera os lugares do combo de uma reserva que expirou (chamado pelos jobs). */
+    @Transactional
+    public void liberarMesasCombo(Reserva r) { cancelarMesasCombo(r); }
 
     // =====================================================================
     // Confirmação (chamada pelo PagamentoService quando o pagamento é aprovado / "na chegada")
@@ -337,23 +355,15 @@ public class ReservaService {
             cupom = cupons.findById(r.getCupomId()).orElseThrow(this::cupomInvalido);
             validarCupom(cupom);
         }
-        Usuario usuario = null;
-        if (r.getOssosUsados() > 0) {
-            usuario = usuarios.findById(r.getUsuarioId()).orElseThrow(Util::naoAutenticado);
-            if (usuario.getSaldoOssos() < r.getOssosUsados()) {
-                throw Util.validacao("O saldo de ossos mudou e não cobre mais o resgate.");
-            }
-        }
         // --- a partir daqui só gravações ---
         r.setStatus(StatusReserva.CONFIRMADA);
         r.setAtualizadoEm(Util.agora());
         reservas.save(r);
         if (cupom != null) { cupom.setUsos(cupom.getUsos() + 1); cupons.save(cupom); }
-        if (usuario != null) {
-            usuario.setSaldoOssos(usuario.getSaldoOssos() - r.getOssosUsados());
-            usuarios.save(usuario);
-            registrarMovimento(usuario.getId(), r.getId(), -r.getOssosUsados(), MotivoOssos.RESGATE);
-        }
+        // as mesas do combo, que seguravam lugar no salão, passam a valer
+        mesas.findByReservaIdAndOrigem(r.getId(), OrigemMesa.COMBO).stream()
+                .filter(m -> m.getStatus() == StatusMesa.PENDENTE)
+                .forEach(m -> { m.setStatus(StatusMesa.CONFIRMADA); mesas.save(m); });
     }
 
     // =====================================================================
@@ -394,8 +404,11 @@ public class ReservaService {
             doc.add(new Paragraph(" "));
             doc.add(new Paragraph("Diárias: " + Util.reais(v.valorDiarias())));
             doc.add(new Paragraph("Extras: " + Util.reais(v.valorExtras())));
+            if (v.combo() != null) {
+                doc.add(new Paragraph("Combo " + v.combo().nome() + " (jantar às " + v.combo().horario() + "): "
+                        + Util.reais(v.valorCombo())));
+            }
             doc.add(new Paragraph("Desconto (cupom): " + Util.reais(v.desconto())));
-            doc.add(new Paragraph("Ossos usados: " + v.ossosUsados()));
             doc.add(new Paragraph("Total: " + Util.reais(v.total()) + (v.pago() ? " (pago)" : " (a pagar)")));
             doc.close();
             return out.toByteArray();
@@ -405,8 +418,29 @@ public class ReservaService {
         }
     }
 
+    /** "Adicionar à agenda": arquivo iCalendar com a estadia (entrada 14h, saída 12h ou 15h com late check-out). */
+    @Transactional(readOnly = true)
+    public String agendaIcs(String codigo, Solicitante s) {
+        ReservaRes v = voucher(codigo, s);
+        java.time.format.DateTimeFormatter f = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss");
+        String inicio = v.checkIn().atTime(14, 0).format(f);
+        String fim = v.checkOut().atTime(v.lateCheckout() ? 15 : 12, 0).format(f);
+        String agora = java.time.LocalDateTime.now(Util.FUSO).format(f);
+        return String.join("\r\n",
+                "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Huga Buga Hotel//Reservas//PT", "CALSCALE:GREGORIAN",
+                "BEGIN:VEVENT",
+                "UID:" + v.codigo() + "@hugabuga",
+                "DTSTAMP;TZID=America/Sao_Paulo:" + agora,
+                "DTSTART;TZID=America/Sao_Paulo:" + inicio,
+                "DTEND;TZID=America/Sao_Paulo:" + fim,
+                "SUMMARY:Huga Buga Hotel - " + v.cavernaNome(),
+                "DESCRIPTION:Reserva " + v.codigo() + ". Entrada a partir das 14h.",
+                "LOCATION:Huga Buga Hotel",
+                "END:VEVENT", "END:VCALENDAR", "");
+    }
+
     // =====================================================================
-    // Gestão: alterar datas, cancelar, check-in, relato
+    // Gestão: alterar datas, cancelar, check-in
     // =====================================================================
 
     @Transactional
@@ -429,6 +463,10 @@ public class ReservaService {
         r.setCheckIn(req.checkIn());
         r.setCheckOut(req.checkOut());
         r.setValorDiarias(cot.valorDiariasCentavos());
+        if (r.getComboId() != null) { // jantares do combo acompanham as novas noites
+            reservarMesasCombo(r, StatusMesa.CONFIRMADA);
+            r.setValorCombo(valorCombo(r, combo(r.getComboId())));
+        }
         recalcular(r);
         int diferenca = r.getTotal() - totalAntigo;
 
@@ -468,7 +506,6 @@ public class ReservaService {
             if (ChronoUnit.DAYS.between(Util.hoje(), r.getCheckIn()) >= PRAZO_DIAS) {
                 reembolso = pags.stream().filter(p -> p.getStatus() == StatusPagamento.APROVADO)
                         .mapToInt(Pagamento::getValorCentavos).sum();
-                devolverOssos(r);
             } else if (eraNaChegada) { // fora do prazo + pagar na chegada: multa de 1 diária
                 multa = r.getValorDiarias() / Math.max(1, noites(r));
                 Pagamento p = new Pagamento();
@@ -479,7 +516,7 @@ public class ReservaService {
                 p.setCriadoEm(Util.agora());
                 pagamentos.save(p);
             }
-            // fora do prazo com pagamento aprovado: sem reembolso e ossos não voltam
+            // fora do prazo com pagamento aprovado: sem reembolso
         }
         cancelarDependencias(r);
         mudarStatus(r, StatusReserva.CANCELADA);
@@ -505,23 +542,6 @@ public class ReservaService {
         return toRes(r);
     }
 
-    @Transactional
-    public void registrarRelato(String codigo, RelatoReq req, Solicitante s) {
-        Reserva r = carregarDonoParaEscrita(codigo, s);
-        exigirStatus(r, StatusReserva.CONCLUIDA);
-        if (r.getUsuarioId() == null) throw Util.estadoInvalido("Só quem tem conta pode enviar relato. Entre na sua conta.");
-        if (relatos.existsByReservaId(r.getId())) throw Util.estadoInvalido("Esta estadia já tem um relato.");
-        Relato rel = new Relato();
-        rel.setCavernaId(r.getCavernaId());
-        rel.setReservaId(r.getId());
-        rel.setUsuarioId(r.getUsuarioId());
-        rel.setNota(req.nota());
-        rel.setTexto(req.texto());
-        rel.setCriadoEm(Util.agora());
-        relatos.save(rel);
-        cavernaService.recalcularNota(r.getCavernaId());
-    }
-
     // =====================================================================
     // Jobs (chamados pela TarefasAgendadas)
     // =====================================================================
@@ -529,7 +549,11 @@ public class ReservaService {
     @Transactional
     public int expirarVencidas() {
         List<Reserva> vencidas = reservas.findByStatusAndExpiraEmBefore(StatusReserva.PENDENTE, Util.agora());
-        vencidas.forEach(r -> { r.setStatus(StatusReserva.EXPIRADA); r.setAtualizadoEm(Util.agora()); }); // libera a unidade
+        vencidas.forEach(r -> {
+            r.setStatus(StatusReserva.EXPIRADA); // libera a unidade
+            r.setAtualizadoEm(Util.agora());
+            cancelarMesasCombo(r);              // e os lugares do combo no Banquete
+        });
         reservas.saveAll(vencidas);
         return vencidas.size();
     }
@@ -538,17 +562,8 @@ public class ReservaService {
     public int concluirEstadias() {
         List<Reserva> finalizadas = reservas.findByStatusAndCheckOutBefore(StatusReserva.CONFIRMADA, Util.hoje());
         for (Reserva r : finalizadas) {
-            mudarStatus(r, StatusReserva.CONCLUIDA);
+            mudarStatus(r, StatusReserva.CONCLUIDA); // libera a avaliação da estadia
             reservas.save(r);
-            int ossos = r.getValorDiarias() / 1000; // 1 osso a cada R$ 10 em diárias
-            if (r.getUsuarioId() != null && ossos > 0) {
-                Usuario u = usuarios.findById(r.getUsuarioId()).orElse(null);
-                if (u != null) {
-                    u.setSaldoOssos(u.getSaldoOssos() + ossos);
-                    usuarios.save(u);
-                    registrarMovimento(u.getId(), r.getId(), ossos, MotivoOssos.GANHO_ESTADIA);
-                }
-            }
         }
         return finalizadas.size();
     }
@@ -579,8 +594,12 @@ public class ReservaService {
         return reservas.findById(id).orElseThrow(() -> Util.naoEncontrado("Reserva"));
     }
 
-    /** Dono = usuário logado da reserva OU pedido com o e-mail do responsável. Sem isso, trocar o código vazaria reservas. */
+    /**
+     * Dono = usuário logado da reserva OU pedido com o e-mail do responsável. Sem isso, trocar o código vazaria
+     * reservas. A equipe do hotel (ADMIN) pode agir em qualquer reserva.
+     */
     public void verificarDono(Reserva r, Solicitante s) {
+        if (s.admin()) return;
         boolean donoConta = r.getUsuarioId() != null && r.getUsuarioId().equals(s.usuarioId());
         boolean donoEmail = s.email() != null && r.getResponsavelEmail() != null
                 && r.getResponsavelEmail().equalsIgnoreCase(s.email().trim());
@@ -623,9 +642,9 @@ public class ReservaService {
         boolean pago = pagamentos.findByReservaId(r.getId()).stream().anyMatch(p -> p.getStatus() == StatusPagamento.APROVADO);
         return new ReservaRes(r.getCodigo(), r.getStatus(), c.getId(), c.getNome(), unidade, r.getCheckIn(), r.getCheckOut(),
                 noites(r), r.getAdultos(), r.getCriancas(), r.getExpiraEm(), r.isProrrogada(), r.getResponsavelNome(),
-                r.getResponsavelEmail(), r.getResponsavelCelular(), hs, exs, cupom, r.getPedidoEspecial(), r.isLateCheckout(),
-                r.getValorDiarias(), r.getValorExtras(), r.getDesconto(), r.getOssosUsados(), r.getTotal(), pago,
-                r.getCheckinOnlineEm());
+                r.getResponsavelEmail(), r.getResponsavelCelular(), hs, exs, comboRes(r), cupom, r.getPedidoEspecial(),
+                r.isLateCheckout(), r.getValorDiarias(), r.getValorExtras(), r.getValorCombo(), r.getDesconto(),
+                r.getTotal(), pago, r.getCheckinOnlineEm());
     }
 
     // =====================================================================
@@ -660,28 +679,87 @@ public class ReservaService {
                 Map.of("sugestoes", cavernaService.sugerir(List.of(c), in, out)));
     }
 
-    private void devolverOssos(Reserva r) {
-        if (r.getOssosUsados() > 0 && r.getUsuarioId() != null) {
-            usuarios.findById(r.getUsuarioId()).ifPresent(u -> {
-                u.setSaldoOssos(u.getSaldoOssos() + r.getOssosUsados());
-                usuarios.save(u);
-                // AJUSTE não conta como "acumulado": devolver ossos não sobe o nível
-                registrarMovimento(u.getId(), r.getId(), r.getOssosUsados(), MotivoOssos.AJUSTE);
-            });
+    // ---------- combo ----------
+
+    private ComboBanquete combo(String id) {
+        return combos.findById(id).filter(ComboBanquete::isAtivo).orElseThrow(() -> Util.naoEncontrado("O combo " + id));
+    }
+
+    /** Pessoas que pagam o combo: quem tem mais de 12 anos paga como adulto; 6 a 12, como criança; até 5, nada. */
+    private int[] pagantesCombo(Reserva r) {
+        List<HospedeReserva> hs = hospedes.findByReservaId(r.getId());
+        if (hs.isEmpty()) return new int[]{r.getAdultos(), r.getCriancas()};
+        int adultos = 0, criancas = 0;
+        for (HospedeReserva h : hs) {
+            if (h.getTipo() == TipoHospede.ADULTO || h.getIdade() > IDADE_CRIANCA_MAX) adultos++;
+            else if (h.getIdade() > IDADE_GRATIS_MAX) criancas++;
+        }
+        return new int[]{adultos, criancas};
+    }
+
+    private int valorCombo(Reserva r, ComboBanquete c) {
+        int[] p = pagantesCombo(r);
+        return noites(r) * (p[0] * c.getPrecoAdultoCentavos() + p[1] * c.getPrecoCriancaCentavos());
+    }
+
+    /**
+     * (Re)cria uma mesa por noite da estadia no horário do combo, para a tribo inteira. As mesas antigas do combo
+     * são canceladas antes, para não contarem duas vezes na lotação. Confere TODAS as noites antes de gravar.
+     */
+    private void reservarMesasCombo(Reserva r, StatusMesa status) {
+        cancelarMesasCombo(r);
+        mesas.flush();
+        int pessoas = r.getAdultos() + r.getCriancas();
+        LocalTime horario = r.getComboHorario();
+        List<LocalDate> noites = r.getCheckIn().datesUntil(r.getCheckOut()).toList();
+        if (noites.getFirst().equals(Util.hoje()) && !horario.isAfter(LocalTime.now(Util.FUSO))) {
+            throw Util.validacao("O horário do jantar de hoje já passou. Escolha um horário mais tarde.");
+        }
+        for (LocalDate d : noites) ocupacaoBanquete.garantirLugares(d, horario, pessoas);
+        for (LocalDate d : noites) {
+            ReservaMesa m = new ReservaMesa();
+            m.setCodigo(codigoMesaUnico());
+            m.setUsuarioId(r.getUsuarioId());
+            m.setReservaId(r.getId());
+            m.setOrigem(OrigemMesa.COMBO);
+            m.setNomeContato(r.getResponsavelNome());
+            m.setEmailContato(r.getResponsavelEmail());
+            m.setCelularContato(r.getResponsavelCelular());
+            m.setData(d);
+            m.setHorario(horario);
+            m.setPessoas(pessoas);
+            m.setStatus(status);
+            m.setCriadoEm(Util.agora());
+            mesas.save(m);
         }
     }
 
-    private void registrarMovimento(UUID usuarioId, UUID reservaId, int quantidade, MotivoOssos motivo) {
-        MovimentoOssos m = new MovimentoOssos();
-        m.setUsuarioId(usuarioId);
-        m.setReservaId(reservaId);
-        m.setQuantidade(quantidade);
-        m.setMotivo(motivo);
-        m.setCriadoEm(Util.agora());
-        movimentos.save(m);
+    private void cancelarMesasCombo(Reserva r) {
+        mesas.findByReservaIdAndOrigem(r.getId(), OrigemMesa.COMBO).stream()
+                .filter(m -> m.getStatus() == StatusMesa.PENDENTE || m.getStatus() == StatusMesa.CONFIRMADA)
+                .forEach(m -> { m.setStatus(StatusMesa.CANCELADA); mesas.save(m); });
     }
 
-    /** Ao cancelar a estadia: devolve vagas de atividades e cancela mesas do Banquete. */
+    private ComboSelecionadoRes comboRes(Reserva r) {
+        if (r.getComboId() == null) return null;
+        ComboBanquete c = combos.findById(r.getComboId()).orElse(null);
+        int[] p = pagantesCombo(r);
+        List<String> codigos = mesas.findByReservaIdAndOrigem(r.getId(), OrigemMesa.COMBO).stream()
+                .filter(m -> m.getStatus() != StatusMesa.CANCELADA)
+                .sorted(Comparator.comparing(ReservaMesa::getData)).map(ReservaMesa::getCodigo).toList();
+        return new ComboSelecionadoRes(r.getComboId(), c == null ? r.getComboId() : c.getNome(), r.getComboHorario(),
+                noites(r), p[0], p[1], r.getValorCombo(), codigos);
+    }
+
+    private String codigoMesaUnico() {
+        for (int i = 0; i < 20; i++) {
+            String c = Util.codigo("BQ");
+            if (mesas.findByCodigo(c).isEmpty()) return c;
+        }
+        throw new IllegalStateException("Não foi possível gerar um código de mesa único.");
+    }
+
+    /** Ao cancelar a estadia: devolve vagas de atividades e cancela mesas do Banquete (avulsas e do combo). */
     private void cancelarDependencias(Reserva r) {
         for (AgendamentoAtividade a : agendamentos.findByReservaId(r.getId())) {
             if (a.getStatus() == StatusAgendamento.ATIVO) {
@@ -691,7 +769,10 @@ public class ReservaService {
             }
         }
         for (ReservaMesa m : mesas.findByReservaId(r.getId())) {
-            if (m.getStatus() == StatusMesa.CONFIRMADA) { m.setStatus(StatusMesa.CANCELADA); mesas.save(m); }
+            if (m.getStatus() == StatusMesa.CONFIRMADA || m.getStatus() == StatusMesa.PENDENTE) {
+                m.setStatus(StatusMesa.CANCELADA);
+                mesas.save(m);
+            }
         }
     }
 }

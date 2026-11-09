@@ -15,11 +15,11 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * Lê "Authorization: Bearer <token>", valida e identifica o usuário (o principal é o UUID dele,
- * acessível nos controllers com @AuthenticationPrincipal UUID usuarioId).
+ * acessível nos controllers com @AuthenticationPrincipal UUID usuarioId). O papel do token vira a
+ * authority ROLE_VISITANTE ou ROLE_ADMIN.
  *
  * - Sem token: segue anônimo. Rota protegida responde 401 NAO_AUTENTICADO (entry point do SecurityConfig).
  * - Token vencido: 401 SESSAO_EXPIRADA. Token inválido: 401 NAO_AUTENTICADO. Vale também em rotas livres,
@@ -47,7 +47,9 @@ public class JwtFilter extends OncePerRequestFilter {
         String p = request.getRequestURI();
         return p.equals(prefixoApi + "/auth/cadastro")
                 || p.equals(prefixoApi + "/auth/login")
-                || p.equals(prefixoApi + "/auth/refresh");
+                || p.equals(prefixoApi + "/auth/refresh")
+                || p.equals(prefixoApi + "/auth/esqueci-senha")
+                || p.equals(prefixoApi + "/auth/redefinir-senha");
     }
 
     @Override
@@ -59,9 +61,9 @@ public class JwtFilter extends OncePerRequestFilter {
             return;
         }
         try {
-            UUID usuarioId = jwt.validarEExtrairUsuario(header.substring(BEARER.length()).trim());
-            var auth = new UsernamePasswordAuthenticationToken(usuarioId, null,
-                    List.of(new SimpleGrantedAuthority("ROLE_HOSPEDE")));
+            JwtService.Sessao sessao = jwt.validar(header.substring(BEARER.length()).trim());
+            var auth = new UsernamePasswordAuthenticationToken(sessao.usuarioId(), null,
+                    List.of(new SimpleGrantedAuthority("ROLE_" + sessao.role().name())));
             auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(auth);
         } catch (ApiException e) {

@@ -45,10 +45,12 @@ public class Reserva {
     // Valores em centavos
     private int valorDiarias;
     private int valorExtras;
+    /** Combo quarto + Banquete (jantar todas as noites). Nulo = sem combo. */
+    private String comboId;
+    private LocalTime comboHorario;
+    private int valorCombo;
     /** Desconto do cupom. */
     private int desconto;
-    /** Quantidade de ossos (10 ossos = R$ 1). */
-    private int ossosUsados;
     private int total;
 
     private UUID cupomId;

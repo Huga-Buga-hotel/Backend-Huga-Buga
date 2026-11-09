@@ -128,23 +128,13 @@ class PagamentoSimuladoTest extends IntegrationTestBase {
         assertFalse(p.toString().contains(CARTAO_APROVADO));
     }
 
-    // ---------- ossos ----------
-
     @Test
-    void recusaNaoDebitaOssosEAprovacaoDebita() {
-        Solicitante s = marina();
-        ReservaRes r = criarPadrao(s);
-        reservaService.usarOssos(r.codigo(), 100, s);
-
-        erro(() -> pagamentoService.pagar(r.codigo(), cartao(CARTAO_SALDO_INSUFICIENTE, 1), s));
-        assertEquals(450, usuarioRepository.findById(marinaId()).orElseThrow().getSaldoOssos());
-        assertEquals(100, reserva(r.codigo()).getOssosUsados());
-
-        pagamentoService.pagar(r.codigo(), cartao(CARTAO_APROVADO, 1), s);
-        assertEquals(350, usuarioRepository.findById(marinaId()).orElseThrow().getSaldoOssos());
-        MovimentoOssos m = movimentoRepository.findByUsuarioIdOrderByCriadoEmDesc(marinaId()).get(0);
-        assertEquals(-100, m.getQuantidade());
-        assertEquals(MotivoOssos.RESGATE, m.getMotivo());
+    void naoDaParaPagarSemPreencherQuemVem() {
+        ReservaRes r = reservaService.criar(new com.hugabuga.api.dto.ReservaDtos.CriarReservaReq(
+                cavernaId(TOCA), dias(30), dias(33), 2, List.of(), "cliente@example.com", null), cliente);
+        var e = erro(() -> pagamentoService.pagar(r.codigo(), cartao(CARTAO_APROVADO, 1), cliente));
+        assertErro(e, HttpStatus.BAD_REQUEST, "VALIDACAO");
+        assertTrue(pagamentoRepository.findByReservaId(reserva(r.codigo()).getId()).isEmpty());
     }
 
     // ---------- Pix ----------

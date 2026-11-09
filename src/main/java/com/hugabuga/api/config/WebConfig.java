@@ -19,6 +19,7 @@ import java.util.UUID;
  * Ele junta as duas formas de ser "dono" de uma reserva:
  *  - usuário logado (UUID do token JWT), e/ou
  *  - e-mail do responsável, enviado no header X-Responsavel-Email (reserva feita sem conta).
+ * Também diz se o token é de ADMIN (a equipe do hotel pode agir em qualquer reserva).
  */
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
@@ -42,9 +43,11 @@ public class WebConfig implements WebMvcConfigurer {
                                       NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
             UUID usuarioId = (auth != null && auth.isAuthenticated() && auth.getPrincipal() instanceof UUID u) ? u : null;
+            boolean admin = usuarioId != null && auth.getAuthorities().stream()
+                    .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
             String email = webRequest.getHeader(HEADER_EMAIL);
             if (email != null && email.isBlank()) email = null;
-            return new Solicitante(usuarioId, email);
+            return new Solicitante(usuarioId, email, admin);
         }
     }
 }

@@ -1,10 +1,9 @@
 package com.hugabuga.api;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
-class MainApplicationTests {
+/** Sobe o contexto inteiro contra o PostgreSQL do Testcontainers (sem ele, faltaria o banco). */
+class MainApplicationTests extends IntegrationTestBase {
 
 	@Test
 	void contextLoads() {

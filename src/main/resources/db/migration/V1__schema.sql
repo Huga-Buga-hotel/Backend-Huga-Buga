@@ -1,5 +1,5 @@
 -- =====================================================================
--- Huga Buga Hotel - schema (25 tabelas)
+-- Huga Buga Hotel - schema
 -- Tipos escolhidos para bater com as entidades JPA (ddl-auto = validate).
 -- Dinheiro sempre em centavos (integer). Timestamps com fuso (timestamptz).
 -- =====================================================================
@@ -21,9 +21,13 @@ CREATE TABLE usuario (
     numero_documento varchar(255),
     data_nascimento  date,
     aceita_ofertas   boolean      NOT NULL DEFAULT false,
-    saldo_ossos      integer      NOT NULL DEFAULT 0,
+    role             varchar(20)  NOT NULL DEFAULT 'VISITANTE',
+    idioma           varchar(5)   NOT NULL DEFAULT 'pt-BR',
+    notificacoes_email    boolean NOT NULL DEFAULT true,
+    notificacoes_whatsapp boolean NOT NULL DEFAULT false,
     criado_em        timestamptz  NOT NULL DEFAULT now(),
-    CONSTRAINT ck_usuario_saldo_ossos CHECK (saldo_ossos >= 0)
+    CONSTRAINT ck_usuario_role CHECK (role IN ('VISITANTE', 'ADMIN')),
+    CONSTRAINT ck_usuario_idioma CHECK (idioma IN ('pt-BR', 'en', 'es'))
 );
 CREATE UNIQUE INDEX uk_usuario_email_lower ON usuario (lower(email));
 
@@ -44,6 +48,15 @@ CREATE TABLE refresh_token (
     token_hash varchar(255) NOT NULL UNIQUE,
     expira_em  timestamptz  NOT NULL,
     revogado   boolean      NOT NULL DEFAULT false
+);
+
+-- "Esqueci a senha": token de uso único, guardado só como hash
+CREATE TABLE redefinicao_senha (
+    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    usuario_id uuid         NOT NULL REFERENCES usuario (id) ON DELETE CASCADE,
+    token_hash varchar(255) NOT NULL UNIQUE,
+    expira_em  timestamptz  NOT NULL,
+    usado      boolean      NOT NULL DEFAULT false
 );
 
 -- ---------------------------------------------------------------------
@@ -112,6 +125,17 @@ CREATE TABLE tarifa_especial (
 -- ---------------------------------------------------------------------
 -- 3.3 Reserva (checkout)
 -- ---------------------------------------------------------------------
+-- Combo quarto + Banquete: jantar todas as noites da estadia, escolhido no checkout
+CREATE TABLE combo_banquete (
+    id                    varchar(100) PRIMARY KEY,   -- ex.: JANTAR_DA_TRIBO
+    nome                  varchar(255) NOT NULL,
+    descricao             varchar(500),
+    preco_adulto_centavos  integer     NOT NULL,      -- por noite
+    preco_crianca_centavos integer     NOT NULL,      -- por noite (6 a 12 anos; até 5 não paga)
+    ativo                 boolean      NOT NULL DEFAULT true,
+    CONSTRAINT ck_combo_precos CHECK (preco_adulto_centavos >= 0 AND preco_crianca_centavos >= 0)
+);
+
 CREATE TABLE cupom (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     codigo       varchar(255) NOT NULL UNIQUE,
@@ -150,8 +174,10 @@ CREATE TABLE reserva (
     late_checkout              boolean      NOT NULL DEFAULT false,
     valor_diarias              integer      NOT NULL DEFAULT 0,
     valor_extras               integer      NOT NULL DEFAULT 0,
+    combo_id                   varchar(100) REFERENCES combo_banquete (id),
+    combo_horario              time,
+    valor_combo                integer      NOT NULL DEFAULT 0,
     desconto                   integer      NOT NULL DEFAULT 0,
-    ossos_usados               integer      NOT NULL DEFAULT 0,
     total                      integer      NOT NULL DEFAULT 0,
     cupom_id                   uuid REFERENCES cupom (id),
     checkin_online_em          timestamptz,
@@ -162,8 +188,9 @@ CREATE TABLE reserva (
         ('PENDENTE', 'AGUARDANDO_PAGAMENTO', 'CONFIRMADA', 'CANCELADA', 'EXPIRADA', 'CONCLUIDA')),
     CONSTRAINT ck_reserva_datas CHECK (check_out > check_in),
     CONSTRAINT ck_reserva_pessoas CHECK (adultos >= 1 AND criancas >= 0),
-    CONSTRAINT ck_reserva_valores CHECK (valor_diarias >= 0 AND valor_extras >= 0 AND desconto >= 0
-                                         AND ossos_usados >= 0 AND total >= 0),
+    CONSTRAINT ck_reserva_valores CHECK (valor_diarias >= 0 AND valor_extras >= 0 AND valor_combo >= 0
+                                         AND desconto >= 0 AND total >= 0),
+    CONSTRAINT ck_reserva_combo CHECK ((combo_id IS NULL) = (combo_horario IS NULL)),
     -- Última barreira contra reserva dupla: a mesma unidade nunca tem duas reservas ativas em datas
     -- sobrepostas. O intervalo [) deixa o check-out de um hóspede coincidir com o check-in do próximo.
     CONSTRAINT ex_reserva_sem_sobreposicao EXCLUDE USING gist (
@@ -183,15 +210,16 @@ CREATE TABLE relato (
     CONSTRAINT ck_relato_nota CHECK (nota BETWEEN 1 AND 5)
 );
 
-CREATE TABLE movimento_ossos (
-    id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    usuario_id uuid        NOT NULL REFERENCES usuario (id) ON DELETE CASCADE,
-    reserva_id uuid REFERENCES reserva (id) ON DELETE SET NULL,
-    quantidade integer     NOT NULL,     -- positivo ganha, negativo usa
-    motivo     varchar(30) NOT NULL,
-    criado_em  timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT ck_movimento_motivo CHECK (motivo IN ('GANHO_ESTADIA', 'RESGATE', 'AJUSTE')),
-    CONSTRAINT ck_movimento_quantidade CHECK (quantidade <> 0)
+-- Fotos anexadas à avaliação. O arquivo fica no disco (hugabuga.uploads.dir); aqui só o nome gerado.
+CREATE TABLE foto_relato (
+    id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    relato_id     uuid         NOT NULL REFERENCES relato (id) ON DELETE CASCADE,
+    arquivo       varchar(255) NOT NULL UNIQUE,     -- <uuid>.<ext>, nunca o nome enviado pelo cliente
+    content_type  varchar(50)  NOT NULL,
+    tamanho_bytes bigint       NOT NULL,
+    ordem         integer      NOT NULL DEFAULT 0,
+    CONSTRAINT ck_foto_relato_tipo CHECK (content_type IN ('image/jpeg', 'image/png', 'image/webp')),
+    CONSTRAINT ck_foto_relato_tamanho CHECK (tamanho_bytes > 0)
 );
 
 CREATE TABLE favorito (
@@ -329,19 +357,21 @@ CREATE TABLE item_cardapio (
         ('NA_FOGUEIRA', 'ENTRADAS', 'MENU_KIDS', 'DA_HORTA', 'SOBREMESAS', 'POCOES'))
 );
 
+-- Horários em que dá para começar uma refeição. A capacidade (50 lugares) é do salão inteiro e
+-- fica em hugabuga.restaurante.capacidade-pessoas: mesas com horários sobrepostos somam juntas.
 CREATE TABLE horario_mesa (
-    id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    horario              time    NOT NULL UNIQUE,
-    capacidade_pessoas   integer NOT NULL DEFAULT 40,
-    CONSTRAINT ck_horario_capacidade CHECK (capacidade_pessoas > 0)
+    id      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    horario time NOT NULL UNIQUE
 );
 
 CREATE TABLE reserva_mesa (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     codigo          varchar(255) NOT NULL UNIQUE,     -- BQ-XXXX
     usuario_id      uuid REFERENCES usuario (id) ON DELETE SET NULL,
-    reserva_id      uuid         NOT NULL REFERENCES reserva (id) ON DELETE CASCADE,
+    reserva_id      uuid REFERENCES reserva (id) ON DELETE CASCADE,   -- nulo = visitante de fora (EXTERNO)
+    origem          varchar(20)  NOT NULL,
     nome_contato    varchar(255),
+    email_contato   varchar(255),
     celular_contato varchar(255),
     data            date         NOT NULL,
     horario         time         NOT NULL,
@@ -350,8 +380,12 @@ CREATE TABLE reserva_mesa (
     perto_fogueira  boolean      NOT NULL DEFAULT false,
     status          varchar(20)  NOT NULL,
     criado_em       timestamptz  NOT NULL DEFAULT now(),
-    CONSTRAINT ck_mesa_status CHECK (status IN ('CONFIRMADA', 'CANCELADA', 'NAO_COMPARECEU')),
-    CONSTRAINT ck_mesa_pessoas CHECK (pessoas BETWEEN 1 AND 12),
+    CONSTRAINT ck_mesa_status CHECK (status IN ('PENDENTE', 'CONFIRMADA', 'CANCELADA', 'NAO_COMPARECEU')),
+    CONSTRAINT ck_mesa_origem CHECK (origem IN ('HOSPEDE', 'COMBO', 'EXTERNO')),
+    -- hóspede e combo sempre ligados a uma estadia; visitante de fora sempre com e-mail de contato
+    CONSTRAINT ck_mesa_vinculo CHECK ((origem = 'EXTERNO' AND reserva_id IS NULL AND email_contato IS NOT NULL)
+                                      OR (origem <> 'EXTERNO' AND reserva_id IS NOT NULL)),
+    CONSTRAINT ck_mesa_pessoas CHECK (pessoas BETWEEN 1 AND 20),
     CONSTRAINT ck_mesa_cadeirinhas CHECK (cadeirinhas >= 0)
 );
 
@@ -360,10 +394,11 @@ CREATE TABLE reserva_mesa (
 -- ---------------------------------------------------------------------
 CREATE INDEX ix_membro_usuario        ON membro_tribo (usuario_id);
 CREATE INDEX ix_refresh_usuario       ON refresh_token (usuario_id);
-CREATE INDEX ix_movimento_usuario     ON movimento_ossos (usuario_id, criado_em DESC);
+CREATE INDEX ix_redefinicao_usuario  ON redefinicao_senha (usuario_id);
 CREATE INDEX ix_unidade_caverna       ON unidade_caverna (caverna_id);
 CREATE INDEX ix_foto_caverna          ON foto_caverna (caverna_id, ordem);
 CREATE INDEX ix_relato_caverna        ON relato (caverna_id, criado_em DESC);
+CREATE INDEX ix_foto_relato           ON foto_relato (relato_id, ordem);
 CREATE INDEX ix_reserva_usuario       ON reserva (usuario_id);
 CREATE INDEX ix_reserva_status_expira ON reserva (status, expira_em);       -- job de expiração
 CREATE INDEX ix_reserva_status_saida  ON reserva (status, check_out);       -- job de conclusão
@@ -373,3 +408,5 @@ CREATE INDEX ix_pagamento_pix_aberto  ON pagamento (metodo, status, pix_expira_e
 CREATE INDEX ix_agendamento_reserva   ON agendamento_atividade (reserva_id);
 CREATE INDEX ix_reserva_mesa_data     ON reserva_mesa (data, horario);
 CREATE INDEX ix_reserva_mesa_reserva  ON reserva_mesa (reserva_id);
+CREATE INDEX ix_reserva_mesa_usuario  ON reserva_mesa (usuario_id);
+CREATE INDEX ix_reserva_caverna_datas ON reserva (caverna_id, check_in, check_out);   -- calendário de disponibilidade

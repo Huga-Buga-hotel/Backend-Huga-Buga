@@ -13,6 +13,8 @@ import java.util.*;
 public interface RelatoRepository extends JpaRepository<Relato, UUID> {
     Page<Relato> findByCavernaIdOrderByCriadoEmDesc(UUID cavernaId, Pageable pageable);
     boolean existsByReservaId(UUID reservaId);
+    /** Depoimentos da home. */
+    List<Relato> findTop3ByNotaGreaterThanEqualOrderByCriadoEmDesc(int nota);
     long countByCavernaId(UUID cavernaId);
 
     @Query("select avg(r.nota) from Relato r where r.cavernaId = :cavernaId")

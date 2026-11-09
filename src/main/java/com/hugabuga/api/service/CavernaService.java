@@ -1,5 +1,6 @@
 package com.hugabuga.api.service;
 
+import com.hugabuga.api.config.SecurityConfig;
 import com.hugabuga.api.dto.CavernaDtos.*;
 import com.hugabuga.api.model.*;
 import com.hugabuga.api.repository.*;
@@ -18,7 +19,7 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** Busca, disponibilidade, cotação, detalhe e relatos. */
+/** Busca, filtros, disponibilidade (calendário), cotação, detalhe e avaliações. */
 @Service
 @RequiredArgsConstructor
 public class CavernaService {
@@ -27,6 +28,8 @@ public class CavernaService {
     private static final int IDADE_GRATIS_MAX = 5;     // até 5 anos: grátis
     private static final int IDADE_CRIANCA_MAX = 12;   // 6 a 12: criança; acima disso conta como adulto
     private static final int POR_PAGINA_RELATOS = 10;
+    private static final int CALENDARIO_MAX_DIAS = 92;
+    public static final String URL_FOTOS_RELATO = SecurityConfig.API + "/arquivos/relatos/";
 
     private final CavernaRepository cavernas;
     private final UnidadeCavernaRepository unidades;
@@ -34,10 +37,14 @@ public class CavernaService {
     private final ComodidadeRepository comodidades;
     private final TarifaEspecialRepository tarifas;
     private final RelatoRepository relatos;
+    private final FotoRelatoRepository fotosRelato;
     private final UsuarioRepository usuarios;
+    private final ReservaRepository reservas;
 
-    @Value("${hugabuga.regras.adulto-extra-centavos:6000}")
-    private int adultoExtraCentavos;
+    @Value("${hugabuga.regras.adulto-extra-centavos:6000}") private int adultoExtraCentavos;
+    @Value("${hugabuga.regras.min-noites:1}") private int minNoites;
+    @Value("${hugabuga.regras.max-noites:30}") private int maxNoites;
+    @Value("${hugabuga.regras.antecedencia-max-dias:365}") private int antecedenciaMaxDias;
 
     private record Candidata(Caverna c, Integer livres, Integer total) {
         int preco() { return total != null ? total : c.getPrecoBaseCentavos(); }
@@ -124,6 +131,58 @@ public class CavernaService {
         return r;
     }
 
+    // ---------- filtros e calendário ----------
+
+    /** Opções da barra de filtros (com contagem por categoria) e as regras de tempo de estadia. */
+    @Transactional(readOnly = true)
+    public FiltrosRes filtros() {
+        List<Caverna> ativas = cavernas.findByAtivaTrue();
+        List<OpcaoContagemRes> categorias = Arrays.stream(CategoriaCaverna.values())
+                .map(cat -> new OpcaoContagemRes(cat.name(), ativas.stream().filter(c -> c.getCategoria() == cat).count()))
+                .toList();
+        IntSummaryStatistics precos = ativas.stream().mapToInt(Caverna::getPrecoBaseCentavos).summaryStatistics();
+        return new FiltrosRes(categorias,
+                ativas.isEmpty() ? 0 : precos.getMin(), ativas.isEmpty() ? 0 : precos.getMax(),
+                comodidades(), ativas.stream().mapToInt(Caverna::getCapacidade).max().orElse(0),
+                List.of("nota", "menor_preco", "maior_preco"),
+                minNoites, maxNoites, antecedenciaMaxDias, "14:00", "12:00");
+    }
+
+    /**
+     * Calendário de disponibilidade: para cada noite de 'de' a 'ate' (inclusive), quantas tocas da caverna estão
+     * livres e o preço da noite (tarifa de feriado ou preço base).
+     */
+    @Transactional(readOnly = true)
+    public List<DiaDisponibilidadeRes> disponibilidade(UUID cavernaId, LocalDate de, LocalDate ate) {
+        Caverna c = cavernas.findById(cavernaId).filter(Caverna::isAtiva).orElseThrow(() -> Util.naoEncontrado("Caverna"));
+        LocalDate inicio = de != null ? de : Util.hoje();
+        LocalDate fim = ate != null ? ate : inicio.plusDays(30);
+        if (inicio.isBefore(Util.hoje())) throw Util.validacao("O calendário começa hoje; escolha uma data a partir de hoje.");
+        if (fim.isBefore(inicio)) throw Util.validacao("A data final não pode ser anterior à inicial.");
+        if (ChronoUnit.DAYS.between(inicio, fim) >= CALENDARIO_MAX_DIAS) {
+            throw Util.validacao("Consulte no máximo " + CALENDARIO_MAX_DIAS + " dias por vez.");
+        }
+        Set<UUID> ativasIds = unidades.findAll().stream()
+                .filter(u -> u.getCavernaId().equals(c.getId()) && u.isAtiva())
+                .map(UnidadeCaverna::getId).collect(Collectors.toSet());
+        List<Reserva> ocupacoes = reservas.ativasNoPeriodo(c.getId(), inicio, fim.plusDays(1)).stream()
+                .filter(r -> ativasIds.contains(r.getUnidadeId())).toList();
+        Map<LocalDate, Integer> especiais = tarifas.findByCavernaIdAndDataBetween(c.getId(), inicio, fim).stream()
+                .collect(Collectors.toMap(TarifaEspecial::getData, TarifaEspecial::getPrecoCentavos, (a, b) -> a));
+
+        List<DiaDisponibilidadeRes> dias = new ArrayList<>();
+        for (LocalDate d = inicio; !d.isAfter(fim); d = d.plusDays(1)) {
+            LocalDate noite = d;
+            long ocupadas = ocupacoes.stream()
+                    .filter(r -> !r.getCheckIn().isAfter(noite) && r.getCheckOut().isAfter(noite))
+                    .map(Reserva::getUnidadeId).distinct().count();
+            int livres = (int) Math.max(0, ativasIds.size() - ocupadas);
+            dias.add(new DiaDisponibilidadeRes(d, livres, ativasIds.size(), livres > 0,
+                    especiais.getOrDefault(d, c.getPrecoBaseCentavos()), especiais.containsKey(d)));
+        }
+        return dias;
+    }
+
     // ---------- cotação ----------
 
     @Transactional(readOnly = true)
@@ -182,14 +241,45 @@ public class CavernaService {
         if (!cavernas.existsById(cavernaId)) throw Util.naoEncontrado("Caverna");
         int p = Math.max(0, page);
         Page<Relato> pg = relatos.findByCavernaIdOrderByCriadoEmDesc(cavernaId, PageRequest.of(p, POR_PAGINA_RELATOS));
-        Map<UUID, Usuario> autores = usuarios.findAllById(pg.stream().map(Relato::getUsuarioId).distinct().toList())
+        return new PaginaRes<>(toRelatos(pg.getContent()), p, POR_PAGINA_RELATOS, pg.getTotalElements());
+    }
+
+    /** Avaliações com autor abreviado ("Marina S.") e as URLs das fotos, em poucas consultas. */
+    @Transactional(readOnly = true)
+    public List<RelatoRes> toRelatos(List<Relato> lista) {
+        if (lista.isEmpty()) return List.of();
+        Map<UUID, Usuario> autores = usuarios.findAllById(lista.stream().map(Relato::getUsuarioId).distinct().toList())
                 .stream().collect(Collectors.toMap(Usuario::getId, Function.identity()));
-        List<RelatoRes> itens = pg.stream().map(r -> {
+        Map<UUID, List<String>> fotos = fotosRelato.findByRelatoIdInOrderByOrdem(lista.stream().map(Relato::getId).toList())
+                .stream().collect(Collectors.groupingBy(FotoRelato::getRelatoId,
+                        Collectors.mapping(f -> URL_FOTOS_RELATO + f.getArquivo(), Collectors.toList())));
+        return lista.stream().map(r -> {
             Usuario u = autores.get(r.getUsuarioId());
             String autor = u == null ? "Hóspede" : u.getNome() + " " + u.getSobrenome().charAt(0) + ".";
-            return new RelatoRes(r.getNota(), r.getTexto(), autor, r.getCriadoEm());
+            return new RelatoRes(r.getId(), r.getNota(), r.getTexto(), autor, r.getCriadoEm(),
+                    fotos.getOrDefault(r.getId(), List.of()));
         }).toList();
-        return new PaginaRes<>(itens, p, POR_PAGINA_RELATOS, pg.getTotalElements());
+    }
+
+    /** Quantas tocas (quartos físicos) ativas o hotel tem. */
+    @Transactional(readOnly = true)
+    public int totalTocas() {
+        return (int) unidades.findAll().stream().filter(UnidadeCaverna::isAtiva).count();
+    }
+
+    /** Home: as cavernas mais bem avaliadas. */
+    @Transactional(readOnly = true)
+    public List<CavernaCardRes> destaques(int quantidade) {
+        List<Caverna> top = cavernas.findByAtivaTrue().stream()
+                .sorted(Comparator.comparingDouble(Caverna::getNotaMedia).reversed()).limit(quantidade).toList();
+        Map<UUID, String> capa = primeiraFoto(top.stream().map(Caverna::getId).toList());
+        return top.stream().map(c -> toCard(c, null, null, capa.get(c.getId()))).toList();
+    }
+
+    /** Home: últimas avaliações com nota 4 ou 5. */
+    @Transactional(readOnly = true)
+    public List<RelatoRes> depoimentos() {
+        return toRelatos(relatos.findTop3ByNotaGreaterThanEqualOrderByCriadoEmDesc(4));
     }
 
     @Transactional(readOnly = true)
@@ -216,9 +306,16 @@ public class CavernaService {
 
     // ---------- internos ----------
 
+    /** Datas válidas e tempo de estadia dentro das regras (mínimo/máximo de noites e antecedência). */
     private void validarDatas(LocalDate in, LocalDate out) {
         if (!out.isAfter(in)) throw Util.validacao("O check-out precisa ser depois do check-in.");
         if (in.isBefore(Util.hoje())) throw Util.validacao("O check-in não pode estar no passado.");
+        long noites = ChronoUnit.DAYS.between(in, out);
+        if (noites < minNoites) throw Util.validacao("A estadia mínima é de " + minNoites + " noite(s).");
+        if (noites > maxNoites) throw Util.validacao("A estadia máxima é de " + maxNoites + " noites.");
+        if (in.isAfter(Util.hoje().plusDays(antecedenciaMaxDias))) {
+            throw Util.validacao("As reservas abrem com até " + antecedenciaMaxDias + " dias de antecedência.");
+        }
     }
 
     private void validarPessoas(int adultos, List<Integer> idades) {

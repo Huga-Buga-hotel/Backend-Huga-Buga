@@ -11,11 +11,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.Period;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/** Perfil, tribo, favoritos, ossos e "Minhas reservas". */
+/** Perfil, preferências, tribo, favoritos, pagamentos e "Minhas reservas". */
 @Service
 @RequiredArgsConstructor
 public class ContaService {
@@ -23,8 +24,10 @@ public class ContaService {
     private final UsuarioRepository usuarios;
     private final MembroTriboRepository membros;
     private final FavoritoRepository favoritos;
-    private final MovimentoOssosRepository movimentos;
     private final CavernaRepository cavernas;
+    private final FotoCavernaRepository fotos;
+    private final PagamentoRepository pagamentos;
+    private final RelatoRepository relatos;
     private final ReservaRepository reservas;
     private final ReservaMesaRepository mesas;
     private final PasswordEncoder encoder;
@@ -61,6 +64,21 @@ public class ContaService {
         u.setSenhaHash(encoder.encode(req.novaSenha()));
         usuarios.save(u);
         authService.revogarTodos(usuarioId); // derruba todas as sessões
+    }
+
+    // ---------- preferências ----------
+
+    @Transactional(readOnly = true)
+    public PreferenciasRes preferencias(UUID usuarioId) { return toPreferencias(buscar(usuarioId)); }
+
+    @Transactional
+    public PreferenciasRes atualizarPreferencias(UUID usuarioId, PreferenciasReq r) {
+        Usuario u = buscar(usuarioId);
+        if (r.idioma() != null) u.setIdioma(r.idioma());
+        if (r.notificacoesEmail() != null) u.setNotificacoesEmail(r.notificacoesEmail());
+        if (r.notificacoesWhatsapp() != null) u.setNotificacoesWhatsapp(r.notificacoesWhatsapp());
+        if (r.aceitaOfertas() != null) u.setAceitaOfertas(r.aceitaOfertas());
+        return toPreferencias(usuarios.save(u));
     }
 
     // ---------- membros da tribo ----------
@@ -112,63 +130,88 @@ public class ContaService {
         favoritos.deleteByUsuarioIdAndCavernaId(usuarioId, cavernaId);
     }
 
-    // ---------- ossos ----------
+    // ---------- pagamentos ----------
 
+    /** Histórico de pagamentos das reservas da conta (nunca há cartão salvo: só final e bandeira). */
     @Transactional(readOnly = true)
-    public OssosRes ossos(UUID usuarioId) {
-        Usuario u = buscar(usuarioId);
-        // Nível usa o TOTAL ACUMULADO (só ganhos), não o saldo: o nível nunca cai.
-        long acumulado = movimentos.somaGanhos(usuarioId);
-        NivelFidelidade nivel = NivelFidelidade.de(acumulado);
-        NivelFidelidade prox = nivel.proximo();
-        List<MovimentoRes> extrato = movimentos.findByUsuarioIdOrderByCriadoEmDesc(usuarioId).stream()
-                .map(m -> new MovimentoRes(m.getQuantidade(), m.getMotivo().name(), m.getReservaId(), m.getCriadoEm()))
+    public List<PagamentoResumoRes> pagamentos(UUID usuarioId) {
+        Map<UUID, String> codigos = reservas.findByUsuarioId(usuarioId).stream()
+                .collect(Collectors.toMap(Reserva::getId, Reserva::getCodigo));
+        if (codigos.isEmpty()) return List.of();
+        return pagamentos.findByReservaIdInOrderByCriadoEmDesc(codigos.keySet()).stream()
+                .map(p -> new PagamentoResumoRes(p.getId(), codigos.get(p.getReservaId()), p.getMetodo(), p.getStatus(),
+                        p.getValorCentavos(), p.getParcelas(), p.getCartaoFinal(), p.getCartaoBandeira(),
+                        p.getCriadoEm(), p.getAprovadoEm()))
                 .toList();
-        return new OssosRes(u.getSaldoOssos(), acumulado, nivel.getNome(),
-                prox == null ? null : prox.getNome(),
-                prox == null ? 0 : prox.getMinimo() - acumulado, extrato);
     }
 
     // ---------- minhas reservas ----------
 
+    private static final List<String> ABAS = List.of("proximas", "passadas", "canceladas");
+
+    /** Abas Próximas / Passadas / Canceladas, com a contagem de cada uma. PENDENTE e EXPIRADA nunca aparecem. */
     @Transactional(readOnly = true)
     public MinhasReservasRes minhasReservas(UUID usuarioId, String aba) {
+        if (aba == null || !ABAS.contains(aba)) throw Util.validacao("A aba precisa ser proximas, passadas ou canceladas.");
         LocalDate hoje = Util.hoje();
         List<Reserva> todas = reservas.findByUsuarioId(usuarioId);
-        List<ReservaMesa> todasMesas = mesas.findByUsuarioId(usuarioId);
+        // mesas do combo aparecem dentro da estadia, não soltas na lista
+        List<ReservaMesa> todasMesas = mesas.findByUsuarioId(usuarioId).stream()
+                .filter(m -> m.getOrigem() != OrigemMesa.COMBO).toList();
 
-        List<Reserva> estadias;
-        List<ReservaMesa> mesasAba;
-        switch (aba == null ? "" : aba) {
-            case "proximas" -> {
-                estadias = todas.stream().filter(r -> (r.getStatus() == StatusReserva.CONFIRMADA
-                        || r.getStatus() == StatusReserva.AGUARDANDO_PAGAMENTO) && !r.getCheckOut().isBefore(hoje)).toList();
-                mesasAba = todasMesas.stream().filter(m -> m.getStatus() == StatusMesa.CONFIRMADA && !m.getData().isBefore(hoje)).toList();
-            }
-            case "passadas" -> {
-                estadias = todas.stream().filter(r -> r.getStatus() == StatusReserva.CONCLUIDA
-                        || (r.getStatus() == StatusReserva.CONFIRMADA && r.getCheckOut().isBefore(hoje))).toList();
-                mesasAba = todasMesas.stream().filter(m -> m.getStatus() == StatusMesa.NAO_COMPARECEU
-                        || (m.getStatus() == StatusMesa.CONFIRMADA && m.getData().isBefore(hoje))).toList();
-            }
-            case "canceladas" -> {
-                estadias = todas.stream().filter(r -> r.getStatus() == StatusReserva.CANCELADA).toList();
-                mesasAba = todasMesas.stream().filter(m -> m.getStatus() == StatusMesa.CANCELADA).toList();
-            }
-            default -> throw Util.validacao("A aba precisa ser proximas, passadas ou canceladas.");
+        Map<String, Integer> contagem = new LinkedHashMap<>();
+        for (String a : ABAS) {
+            contagem.put(a, (int) (todas.stream().filter(r -> abaDa(r, hoje).equals(a)).count()
+                    + todasMesas.stream().filter(m -> abaDa(m, hoje).equals(a)).count()));
         }
-        // PENDENTE e EXPIRADA nunca aparecem nas abas.
+        List<Reserva> estadias = todas.stream().filter(r -> abaDa(r, hoje).equals(aba))
+                .sorted(Comparator.comparing(Reserva::getCheckIn)).toList();
+        List<ReservaMesa> mesasAba = todasMesas.stream().filter(m -> abaDa(m, hoje).equals(aba))
+                .sorted(Comparator.comparing(ReservaMesa::getData).thenComparing(ReservaMesa::getHorario)).toList();
 
-        Map<UUID, String> nomes = cavernas.findAllById(estadias.stream().map(Reserva::getCavernaId).distinct().toList())
-                .stream().collect(Collectors.toMap(Caverna::getId, Caverna::getNome));
-        List<ReservaResumoRes> resEstadias = estadias.stream()
-                .sorted(Comparator.comparing(Reserva::getCheckIn))
-                .map(r -> new ReservaResumoRes(r.getCodigo(), r.getCavernaId(), nomes.get(r.getCavernaId()),
-                        r.getCheckIn(), r.getCheckOut(), r.getStatus(), r.getTotal())).toList();
+        List<UUID> cavernaIds = estadias.stream().map(Reserva::getCavernaId).distinct().toList();
+        Map<UUID, Caverna> cavs = cavernas.findAllById(cavernaIds).stream()
+                .collect(Collectors.toMap(Caverna::getId, Function.identity()));
+        Map<UUID, String> capas = cavernaIds.isEmpty() ? Map.of() : fotos.findByCavernaIdInOrderByOrdem(cavernaIds).stream()
+                .collect(Collectors.toMap(FotoCaverna::getCavernaId, FotoCaverna::getUrl, (a, b) -> a));
+        Set<UUID> pagas = estadias.isEmpty() ? Set.of()
+                : pagamentos.findByReservaIdInOrderByCriadoEmDesc(estadias.stream().map(Reserva::getId).toList()).stream()
+                .filter(p -> p.getStatus() == StatusPagamento.APROVADO).map(Pagamento::getReservaId).collect(Collectors.toSet());
+
+        List<ReservaResumoRes> resEstadias = estadias.stream().map(r -> {
+            Caverna c = cavs.get(r.getCavernaId());
+            long dias = ChronoUnit.DAYS.between(hoje, r.getCheckIn());
+            boolean podeAvaliar = r.getStatus() == StatusReserva.CONCLUIDA && !relatos.existsByReservaId(r.getId());
+            return new ReservaResumoRes(r.getCodigo(), r.getCavernaId(), c == null ? null : c.getNome(),
+                    c == null ? null : c.getSlug(), capas.get(r.getCavernaId()), r.getCheckIn(), r.getCheckOut(),
+                    (int) ChronoUnit.DAYS.between(r.getCheckIn(), r.getCheckOut()), r.getAdultos(), r.getCriancas(),
+                    r.getStatus(), r.getTotal(), pagas.contains(r.getId()), dias >= 0 ? (int) dias : null,
+                    r.getComboId() != null, podeAvaliar);
+        }).toList();
         List<MesaResumoRes> resMesas = mesasAba.stream()
-                .sorted(Comparator.comparing(ReservaMesa::getData).thenComparing(ReservaMesa::getHorario))
-                .map(m -> new MesaResumoRes(m.getCodigo(), m.getData(), m.getHorario(), m.getPessoas(), m.getStatus())).toList();
-        return new MinhasReservasRes(resEstadias, resMesas);
+                .map(m -> new MesaResumoRes(m.getCodigo(), m.getData(), m.getHorario(), m.getPessoas(), m.getStatus(),
+                        m.getOrigem())).toList();
+        return new MinhasReservasRes(resEstadias, resMesas, contagem);
+    }
+
+    /** Em qual aba a estadia aparece ("" = nenhuma). */
+    private static String abaDa(Reserva r, LocalDate hoje) {
+        return switch (r.getStatus()) {
+            case CONFIRMADA -> r.getCheckOut().isBefore(hoje) ? "passadas" : "proximas";
+            case AGUARDANDO_PAGAMENTO -> r.getCheckOut().isBefore(hoje) ? "" : "proximas";
+            case CONCLUIDA -> "passadas";
+            case CANCELADA -> "canceladas";
+            case PENDENTE, EXPIRADA -> "";
+        };
+    }
+
+    private static String abaDa(ReservaMesa m, LocalDate hoje) {
+        return switch (m.getStatus()) {
+            case CONFIRMADA -> m.getData().isBefore(hoje) ? "passadas" : "proximas";
+            case NAO_COMPARECEU -> "passadas";
+            case CANCELADA -> "canceladas";
+            case PENDENTE -> "";
+        };
     }
 
     // ---------- internos ----------
@@ -176,10 +219,13 @@ public class ContaService {
     private Usuario buscar(UUID id) { return usuarios.findById(id).orElseThrow(Util::naoAutenticado); }
 
     private PerfilRes toPerfil(Usuario u) {
-        NivelFidelidade nivel = NivelFidelidade.de(movimentos.somaGanhos(u.getId()));
         return new PerfilRes(u.getId(), u.getNome(), u.getSobrenome(), u.getEmail(), u.getCelular(), u.getPais(),
                 u.getTipoDocumento(), mascarar(u.getNumeroDocumento()), u.getDataNascimento(),
-                u.isAceitaOfertas(), u.getSaldoOssos(), nivel.getNome(), "PT");
+                u.isAceitaOfertas(), u.getRole(), u.getIdioma());
+    }
+
+    private PreferenciasRes toPreferencias(Usuario u) {
+        return new PreferenciasRes(u.getIdioma(), u.isNotificacoesEmail(), u.isNotificacoesWhatsapp(), u.isAceitaOfertas());
     }
 
     /** Só os 4 últimos caracteres saem na API (LGPD). */

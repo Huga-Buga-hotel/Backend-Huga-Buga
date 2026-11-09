@@ -38,7 +38,7 @@ public class PagamentoService {
 
     /**
      * noRollbackFor: o cartão recusado precisa GRAVAR a tentativa (RECUSADO) mesmo lançando o 422.
-     * Antes de lançar, nada mais é alterado: recusa não mexe na reserva, no cupom nem nos ossos.
+     * Antes de lançar, nada mais é alterado: recusa não mexe na reserva nem no cupom.
      */
     @Transactional(noRollbackFor = ApiException.class)
     public PagamentoRes pagar(String codigo, PagamentoReq req, Solicitante s) {
@@ -58,6 +58,10 @@ public class PagamentoService {
             throw Util.estadoInvalido("Já existe um Pix aguardando pagamento. Pague-o ou espere ele expirar.");
         }
         reservaService.exigirStatus(r, StatusReserva.PENDENTE);
+        // O voucher precisa de um responsável: o passo 1 ("Quem vem pra caverna?") é obrigatório antes de pagar
+        if (r.getResponsavelNome() == null) {
+            throw Util.validacao("Preencha os dados de quem vem pra caverna antes de pagar.");
+        }
 
         return switch (req.metodo()) {
             case CARTAO -> pagarComCartao(r, req);
@@ -101,7 +105,10 @@ public class PagamentoService {
             p.setStatus(StatusPagamento.EXPIRADO);
             pagamentos.save(p);
             Reserva r = reservaService.carregarPorId(p.getReservaId());
-            if (r.getStatus() == StatusReserva.AGUARDANDO_PAGAMENTO) reservaService.mudarStatus(r, StatusReserva.EXPIRADA);
+            if (r.getStatus() == StatusReserva.AGUARDANDO_PAGAMENTO) {
+                reservaService.mudarStatus(r, StatusReserva.EXPIRADA);
+                reservaService.liberarMesasCombo(r);
+            }
         }
         return vencidos.size();
     }
@@ -139,7 +146,7 @@ public class PagamentoService {
                     "O banco recusou o cartão final " + fin + " (" + porque + "). Nada foi cobrado e a sua toca continua segurada. Tente outro cartão ou escolha Pix.",
                     Map.of("motivo", motivo, "cartaoFinal", fin));
         }
-        reservaService.confirmar(r); // valida cupom/ossos antes de gravar qualquer coisa
+        reservaService.confirmar(r); // valida o cupom antes de gravar qualquer coisa
         p.setStatus(StatusPagamento.APROVADO);
         p.setAprovadoEm(Util.agora());
         return toRes(pagamentos.save(p), r.getCodigo());

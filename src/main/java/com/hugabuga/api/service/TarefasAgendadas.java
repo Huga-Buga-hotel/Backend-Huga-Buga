@@ -14,7 +14,7 @@ public class TarefasAgendadas {
     private final ReservaService reservaService;
     private final PagamentoService pagamentoService;
 
-    /** PENDENTE com expiraEm vencido e Pix vencido viram EXPIRADA (a unidade volta a ficar livre). */
+    /** PENDENTE com expiraEm vencido e Pix vencido viram EXPIRADA (a toca e os lugares do combo voltam a ficar livres). */
     @Scheduled(fixedRate = 60_000)
     public void expirar() {
         try {
@@ -26,7 +26,7 @@ public class TarefasAgendadas {
         }
     }
 
-    /** CONFIRMADA com check-out passado vira CONCLUIDA e credita os ossos. */
+    /** CONFIRMADA com check-out passado vira CONCLUIDA (o que libera a avaliação da estadia). */
     @Scheduled(cron = "0 0 3 * * *", zone = "America/Sao_Paulo")
     public void concluir() {
         try {
