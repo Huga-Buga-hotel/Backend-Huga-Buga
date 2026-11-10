@@ -1,0 +1,73 @@
+# Produção na AWS: uma EC2 rodando 3 containers. Banco no RDS, fotos no S3.
+#
+#   internet ──443──▶ caddy (HTTPS automático) ──▶ api:8080 ──▶ RDS PostgreSQL
+#                                                     │  ▲            S3 (fotos)
+#                                                     ▼  │ tools (GET /cavernas...)
+#                                                  chatbot:8000 ──▶ Groq
+#
+# Só o Caddy publica portas. A API e o chatbot ficam na rede interna do Docker.
+# Os dois repositórios precisam estar lado a lado na EC2:
+#   ~/hugabuga/Backend-Huga-Buga   e   ~/hugabuga/chatbot-huga-buga-hotel
+# Uso (nesta pasta): cp .env.example .env  →  preencha  →  docker compose up -d --build
+
+services:
+  api:
+    build:
+      context: ../..
+    image: hugabuga-api
+    restart: unless-stopped
+    environment:
+      DB_URL: ${DB_URL:?Defina DB_URL no .env}
+      DB_USER: ${DB_USER:?Defina DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD:?Defina DB_PASSWORD}
+      JWT_SEGREDO: ${JWT_SEGREDO:?Defina JWT_SEGREDO no .env}
+      CORS_ORIGENS: ${CORS_ORIGENS:-}
+      SPRING_PROFILES_ACTIVE: ""          # produção: sem Pix simulado nem confirmação manual
+      UPLOADS_TIPO: s3
+      S3_BUCKET: ${S3_BUCKET:?Defina S3_BUCKET}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      CHATBOT_URL: http://chatbot:8000
+      CHATBOT_TOKEN: ${CHATBOT_TOKEN:?Defina CHATBOT_TOKEN no .env}
+      TZ: America/Sao_Paulo
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
+    logging: &logs
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }   # não deixa o disco da EC2 encher
+
+  chatbot:
+    build:
+      context: ${CHATBOT_DIR:-../../../chatbot-huga-buga-hotel}
+    image: hugabuga-chatbot
+    restart: unless-stopped
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:?Defina GROQ_API_KEY}
+      BACKEND_URL: http://api:8080/api/v1  # as tools consultam a API pela rede interna
+      CHATBOT_TOKEN: ${CHATBOT_TOKEN}
+      TZ: America/Sao_Paulo
+    logging: *logs
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"     # o Caddy redireciona para HTTPS e usa a 80 para emitir o certificado
+      - "443:443"
+    environment:
+      DOMINIO: ${DOMINIO:?Defina DOMINIO no .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data                   # certificados (não perca: há limite de emissão)
+      - caddy-config:/config
+    logging: *logs
+
+volumes:
+  caddy-dados:
+  caddy-config:

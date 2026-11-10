@@ -20,7 +20,20 @@
 		<jjwt.version>0.13.0</jjwt.version>
 		<openpdf.version>3.0.4</openpdf.version>
 		<springdoc.version>3.2.0</springdoc.version>
+		<awssdk.version>2.55.16</awssdk.version>
 	</properties>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>software.amazon.awssdk</groupId>
+				<artifactId>bom</artifactId>
+				<version>${awssdk.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<dependencies>
 		<!-- Web, persistência, segurança e validação -->
@@ -88,6 +101,12 @@
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>${springdoc.version}</version>
+		</dependency>
+
+		<!-- Fotos das avaliações no S3 (hugabuga.uploads.tipo=s3). Credenciais pela role da EC2. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
 		</dependency>
 
 		<dependency>

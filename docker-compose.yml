@@ -36,7 +36,12 @@ services:
       CORS_ORIGENS: ${CORS_ORIGENS:-http://localhost:3000,http://localhost:5173}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
       UPLOADS_DIR: /app/uploads
+      # Chatbot rodando no host (uvicorn app:app --port 8000)
+      CHATBOT_URL: ${CHATBOT_URL:-http://host.docker.internal:8000}
+      CHATBOT_TOKEN: ${CHATBOT_TOKEN:-}
       TZ: America/Sao_Paulo
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # no Linux o Docker não cria esse nome sozinho
     ports:
       - "8080:8080"
     volumes:

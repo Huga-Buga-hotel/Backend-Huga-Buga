@@ -34,6 +34,11 @@ docker compose up -d --build
 - PostgreSQL exposto em `localhost:5433` (para o pgAdmin/DBeaver)
 - Fotos das avaliações ficam no volume `hugabuga-uploads`
 
+- Chatbot: rode-o no host (`uvicorn app:app --port 8000` no repositório do chatbot); a API o encontra em
+  `host.docker.internal:8000`
+
+> **Produção na AWS (EC2 + RDS + S3):** veja [`deploy/aws/README.md`](deploy/aws/README.md).
+
 > As migrações V1/V2 foram reescritas nesta versão. Se você já tinha subido o banco antes, recrie o volume: `docker compose down -v`.
 
 ### Opção 2: só o banco no Docker e a API pelo Maven
@@ -74,6 +79,10 @@ Sem o perfil `dev`, a aplicação **não sobe** se faltar alguma das obrigatóri
 | `JWT_SEGREDO` | sim | Segredo do JWT, **mínimo 32 caracteres** |
 | `CORS_ORIGENS` | não | Origens permitidas, separadas por vírgula (padrão: `http://localhost:3000,http://localhost:5173`) |
 | `UPLOADS_DIR` | não | Pasta das fotos das avaliações (padrão: `./uploads`; no Docker: `/app/uploads`) |
+| `UPLOADS_TIPO` | não | `disco` (padrão) ou `s3` |
+| `S3_BUCKET` / `AWS_REGION` | com `s3` | Bucket privado das fotos e região. Credenciais pela IAM role da EC2 |
+| `CHATBOT_URL` | não | API do chatbot (padrão: `http://localhost:8000`) |
+| `CHATBOT_TOKEN` | não | Segredo enviado ao chatbot no header `X-Chatbot-Token` (igual ao `CHATBOT_TOKEN` dele) |
 | `SPRING_PROFILES_ACTIVE` | não | `dev` para desenvolvimento; vazio em produção |
 
 > **Atenção:** `V2__dados_iniciais.sql` contém usuários e senhas de teste. Não use essa carga em produção.
@@ -227,6 +236,20 @@ A referência completa (corpos, respostas e erros) está no Swagger. Resumo por 
 | DELETE | `/admin/relatos/{id}` | Remove avaliação (moderação) |
 | GET | `/admin/usuarios` | Lista usuários |
 | PATCH | `/admin/usuarios/{id}/role` | Muda o role |
+
+### Chatbot (Bugão) — público
+
+O backend repassa para a API do chatbot (repositório `chatbot-huga-buga-hotel`), que fica numa rede privada.
+O `idSessao` é um UUID gerado pelo cliente por conversa; o backend o separa por dono (usuário logado ou
+visitante) antes de repassar, então ninguém escreve na conversa de outra pessoa.
+
+| Método | Rota | Descrição |
+|---|---|---|
+| POST | `/chat` | `{mensagem, idSessao}` → `{resposta}` |
+| POST | `/chat/audio` | multipart `audio` (m4a, mp3, ogg, wav, webm...; até 25 MB), `idSessao`, `idioma` opcional → `{transcricao, resposta}` |
+| DELETE | `/chat/{idSessao}` | Apaga o histórico da conversa (204) |
+
+Chatbot fora do ar → `502 CHATBOT_INDISPONIVEL`.
 
 ### Sistema
 

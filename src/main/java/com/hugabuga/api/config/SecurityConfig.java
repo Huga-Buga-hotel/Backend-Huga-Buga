@@ -87,6 +87,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, API + "/reservas", API + "/alertas-vaga").permitAll()
                         .requestMatchers(HttpMethod.GET, API + "/reservas/buscar").permitAll()
 
+                        // --- chatbot: visitante também conversa; com token, a conversa fica ligada à conta ---
+                        .requestMatchers(API + "/chat", API + "/chat/**").permitAll()
+
                         // --- dono: abertas aqui, autorização por reserva dentro do service ---
                         .requestMatchers(API + "/reservas/**", API + "/pagamentos/**", API + "/restaurante/**").permitAll()
 

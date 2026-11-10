@@ -2,7 +2,8 @@
 # Huga Buga Hotel - configuração base
 # Segredos e conexão vêm de VARIÁVEIS DE AMBIENTE (nunca versionar valores reais).
 #   DB_URL, DB_USER, DB_PASSWORD, JWT_SEGREDO (mínimo 32 caracteres)
-#   Opcionais: CORS_ORIGENS, UPLOADS_DIR
+#   Opcionais: CORS_ORIGENS, UPLOADS_DIR, UPLOADS_TIPO (disco|s3), S3_BUCKET, AWS_REGION,
+#              CHATBOT_URL, CHATBOT_TOKEN
 # Para desenvolvimento local use o perfil "dev" (application-dev.yml):
 #   mvn spring-boot:run -Dspring-boot.run.profiles=dev
 # =====================================================================
@@ -74,10 +75,24 @@ hugabuga:
   cors:
     origens: ${CORS_ORIGENS:http://localhost:3000,http://localhost:5173}
 
-  # Onde as fotos das avaliações são gravadas (no Docker: volume em /app/uploads)
+  # Onde as fotos das avaliações são gravadas:
+  #  - "disco" (padrão): pasta local (no Docker, volume em /app/uploads)
+  #  - "s3": bucket privado na AWS. Credenciais pela IAM role da EC2 (nunca chave no .env).
   uploads:
+    tipo: ${UPLOADS_TIPO:disco}
     dir: ${UPLOADS_DIR:./uploads}
+    s3:
+      bucket: ${S3_BUCKET:}
+      regiao: ${AWS_REGION:us-east-1}
+      prefixo: uploads/
     max-fotos-por-avaliacao: 5
+
+  # API do chatbot (repositório chatbot-huga-buga-hotel). Fica numa rede privada: só este backend a chama.
+  # CHATBOT_TOKEN precisa ser igual ao do chatbot (header X-Chatbot-Token).
+  chatbot:
+    url: ${CHATBOT_URL:http://localhost:8000}
+    token: ${CHATBOT_TOKEN:}
+    timeout-segundos: 60
 
   # Turnos do Banquete (entre aspas: o YAML leria 07:00 como número)
   restaurante:

@@ -1,0 +1,6 @@
+# HTTPS automático (Let's Encrypt) para o domínio em DOMINIO.
+# O app Android em release só aceita HTTPS (usesCleartextTraffic=false).
+{$DOMINIO} {
+	encode gzip
+	reverse_proxy api:8080
+}
