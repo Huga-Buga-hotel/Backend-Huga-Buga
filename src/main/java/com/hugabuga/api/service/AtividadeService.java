@@ -130,6 +130,26 @@ public class AtividadeService {
         return toRes(agendamentos.save(a), atv, sessao);
     }
 
+    /** Agendamentos da reserva (ativos e cancelados), na ordem do horário. O id serve para cancelar. */
+    @Transactional(readOnly = true)
+    public List<AgendamentoRes> listarAgendamentos(String codigo, Solicitante s) {
+        Reserva r = reservaService.carregarDono(codigo, s);
+        List<AgendamentoAtividade> lista = agendamentos.findByReservaId(r.getId());
+        Map<UUID, SessaoAtividade> porSessao = sessoes.findAllById(lista.stream().map(AgendamentoAtividade::getSessaoId).toList())
+                .stream().collect(Collectors.toMap(SessaoAtividade::getId, x -> x));
+        Map<UUID, Atividade> porAtividade = atividades.findAllById(porSessao.values().stream()
+                        .map(SessaoAtividade::getAtividadeId).distinct().toList())
+                .stream().collect(Collectors.toMap(Atividade::getId, x -> x));
+        return lista.stream()
+                .filter(a -> porSessao.containsKey(a.getSessaoId()))
+                .map(a -> {
+                    SessaoAtividade sessao = porSessao.get(a.getSessaoId());
+                    return toRes(a, porAtividade.get(sessao.getAtividadeId()), sessao);
+                })
+                .sorted(Comparator.comparing(AgendamentoRes::inicio))
+                .toList();
+    }
+
     @Transactional
     public void cancelar(String codigo, UUID agendamentoId, Solicitante s) {
         Reserva r = reservaService.carregarDonoParaEscrita(codigo, s);

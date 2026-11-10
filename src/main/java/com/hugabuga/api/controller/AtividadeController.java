@@ -68,6 +68,14 @@ public class AtividadeController {
 
     // ---------- dono da reserva ----------
 
+    @Operation(summary = "Agendamentos da reserva", description = "Ativos e cancelados, na ordem do horário. Use o id para cancelar.")
+    @SecurityRequirement(name = OpenApiConfig.BEARER)
+    @SecurityRequirement(name = OpenApiConfig.EMAIL)
+    @GetMapping("/reservas/{codigo}/agendamentos")
+    public List<AgendamentoRes> agendamentos(@PathVariable String codigo, Solicitante s) {
+        return atividadeService.listarAgendamentos(codigo, s);
+    }
+
     @Operation(summary = "Agenda uma sessão", description = "Reserva CONFIRMADA, sessão dentro da estadia e faixa de idade respeitada. 409 VAGAS_ESGOTADAS.")
     @SecurityRequirement(name = OpenApiConfig.BEARER)
     @SecurityRequirement(name = OpenApiConfig.EMAIL)

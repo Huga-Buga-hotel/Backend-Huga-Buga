@@ -176,6 +176,7 @@ A referência completa (corpos, respostas e erros) está no Swagger. Resumo por 
 | GET | `/atividades/{id}` | Detalhe |
 | GET | `/atividades/{id}/sessoes` | Horários e vagas (`de`, `ate`) |
 | POST | `/alertas-vaga` | Botão "Avisar" |
+| GET | `/reservas/{codigo}/agendamentos` | Agendamentos da reserva (com o `id` para cancelar) |
 | POST | `/reservas/{codigo}/agendamentos` | Agenda sessão (reserva `CONFIRMADA`) |
 | DELETE | `/reservas/{codigo}/agendamentos/{id}` | Cancela (até 4 h antes) |
 | GET | `/reservas/{codigo}/agenda` | Agenda do dia (café, atividades, mesa) |

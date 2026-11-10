@@ -4496,6 +4496,7 @@ O Swagger (`/api/v1/docs`) traz o body, a resposta e os erros de cada uma.
 | DELETE | `/reservas/{codigo}/combo` | dono | Total volta e as mesas do combo são canceladas |
 | GET | `/reservas/{codigo}/agenda.ics` | dono | Arquivo de calendário da estadia |
 | GET | `/atividades/sessoes?data=` | livre | Sessões de todas as atividades no dia, com vagas |
+| GET | `/reservas/{codigo}/agendamentos` | dono | Agendamentos da reserva (ativos e cancelados) com o `id` usado no cancelamento |
 | POST | `/auth/esqueci-senha` | livre | Body `{"email":"marina.souza@example.com"}`; no perfil dev vem `tokenDev` |
 | POST | `/auth/redefinir-senha` | livre | Body `{"token":"<tokenDev>","novaSenha":"NovaSenha!2026"}`; reusar o token = 400 |
 | GET / PUT | `/me/preferencias` | login | Idioma (`pt-BR`, `en`, `es`) e notificações |
